@@ -7,15 +7,49 @@ Há dois motores de regras, escolhidos na tela inicial:
 - **Navegador** (`src/engine`): regras básicas escritas aqui, funciona sem instalar nada.
 - **Forge** (`forge-bridge/`): o motor completo do [Forge](https://github.com/Card-Forge/forge), com pilha, todas as cartas e uma IA melhor. Roda numa ponte em Java e o navegador só desenha a mesa. Veja `forge-bridge/README.md`.
 
-```bash
-npm install
-npm run dev        # http://localhost:5173  (abra com #jogar para começar direto uma partida)
-npm test           # testes do motor (sem rede)
-npm run build      # checagem de tipos + build de produção em dist/
+## Instalação
 
-# Motor Forge (precisa de JDK 17+ e Maven)
-npm run forge:instalar   # uma vez: clona e compila o Forge
-npm run forge            # sobe a ponte; depois escolha "Forge" na tela inicial (ou abra com #forge)
+### Requisitos
+
+| Para | Precisa de |
+|---|---|
+| Motor do navegador | [Node.js](https://nodejs.org) 18 ou mais recente (com npm) e Git |
+| Motor Forge (opcional) | Também JDK 17 ou mais recente, Maven 3.9+ e cerca de 2 GB de RAM livre para a ponte |
+
+No Ubuntu/Debian, o necessário para o Forge sai com `sudo apt install openjdk-17-jdk maven`. Confira com `java -version` e `mvn -v`.
+
+### 1. Baixar e rodar o site
+
+```bash
+git clone https://github.com/kassiogluten/mesa-de-duelo.git
+cd mesa-de-duelo
+npm install
+npm run dev        # abre em http://localhost:5173
+```
+
+Na tela inicial, escolha um deck e o motor **Navegador** para jogar contra a IA. Abrir com `#jogar` no fim do endereço começa uma partida direto. As cartas vêm do Scryfall, então o primeiro carregamento de cada deck precisa de internet. Depois elas ficam em cache no navegador.
+
+### 2. Motor Forge (opcional)
+
+O Forge entende todas as cartas e é necessário para os decks marcados como **só no Forge** e para as partidas em rede.
+
+```bash
+npm run forge:instalar   # só uma vez: clona o Forge em ~/forge, compila e instala no ~/.m2 (demora vários minutos)
+npm run forge            # sobe a ponte em ws://127.0.0.1:7171/ws
+```
+
+Com a ponte e o `npm run dev` rodando ao mesmo tempo (em dois terminais), escolha **Forge** na tela inicial ou abra com `#forge`.
+
+- Para instalar o Forge em outro lugar, rode `FORGE_DIR=/caminho npm run forge:instalar` e depois `MAVEN_OPTS="-Xmx2g -Dforge.dir=/caminho" npm run forge`.
+- A ponte depende da versão do Forge em `forge.version` no `forge-bridge/pom.xml`. Se o `forge:instalar` mostrar outra versão no final (`Forge X instalado em ...`), ajuste esse campo para a versão mostrada.
+- Detalhes da ponte e do protocolo estão em `forge-bridge/README.md`.
+
+### Outros comandos
+
+```bash
+npm test           # testes do motor do navegador (sem rede)
+npm run build      # checagem de tipos + build de produção em dist/
+npm run preview    # serve o build de dist/
 ```
 
 ## Partida em rede
