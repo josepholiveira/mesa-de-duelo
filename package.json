@@ -1,0 +1,22 @@
+{
+  "name": "mesa-de-duelo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:rede": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "forge": "bash forge-bridge/scripts/rodar.sh",
+    "forge:rede": "bash forge-bridge/scripts/rodar.sh --host=0.0.0.0",
+    "forge:instalar": "bash forge-bridge/scripts/instalar-forge.sh"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
