@@ -1,0 +1,710 @@
+{
+  "appCommit": "ef1cb1adc325ebd58f92b7e34b0d57449628fddd",
+  "method": "Browser WebSocket receive times using performance.now(); read-only instrumentation. No session tokens, private hands, or protocol mutations. Single observed match, not a latency benchmark.",
+  "observations": {
+    "opponentTurn2": "First received opponent-turn snapshot at 160535 ms already included Hidden Lair; next player-turn snapshot at 160590 ms. Only one opponent-turn snapshot captured.",
+    "opponentTurn4": "First received opponent-turn snapshot at 238115 ms; next player turn at 238590 ms: 475 ms. Splinter stack first observed at 238167 ms; absent at 238590 ms: 423 ms. These bound received-state presentation, not exact server action timing."
+  },
+  "events": [
+    {
+      "tMs": 125965,
+      "turn": 0,
+      "phase": null,
+      "activePlayer": null,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 126017,
+      "turn": 0,
+      "phase": null,
+      "activePlayer": null,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 138083,
+      "turn": 0,
+      "phase": null,
+      "activePlayer": null,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 138136,
+      "turn": 0,
+      "phase": null,
+      "activePlayer": null,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 146415,
+      "turn": 0,
+      "phase": null,
+      "activePlayer": null,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 146469,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 146521,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 146574,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 150694,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 150746,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 155596,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 159624,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 159678,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [
+        "Suntail Hawk"
+      ],
+      "battlefield": [
+        [
+          "Plains"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160053,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [
+        "Suntail Hawk"
+      ],
+      "battlefield": [
+        [
+          "Plains"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160106,
+      "turn": 1,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160318,
+      "turn": 1,
+      "phase": "MAIN2",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        []
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160535,
+      "turn": 2,
+      "phase": "MAIN1",
+      "activePlayer": 1,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160590,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 160645,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 183414,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 183468,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 197829,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 213888,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 213947,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [
+        "Glory Seeker"
+      ],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 214307,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [
+        "Glory Seeker"
+      ],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 214363,
+      "turn": 3,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 214578,
+      "turn": 3,
+      "phase": "COMBAT_DECLARE_ATTACKERS",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 231391,
+      "turn": 3,
+      "phase": "COMBAT_DECLARE_ATTACKERS",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 231444,
+      "turn": 3,
+      "phase": "COMBAT_DECLARE_ATTACKERS",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 237631,
+      "turn": 3,
+      "phase": "COMBAT_DECLARE_ATTACKERS",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 237685,
+      "turn": 3,
+      "phase": "COMBAT_DECLARE_BLOCKERS",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        20
+      ]
+    },
+    {
+      "tMs": 237896,
+      "turn": 3,
+      "phase": "MAIN2",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair"
+        ]
+      ],
+      "life": [
+        20,
+        19
+      ]
+    },
+    {
+      "tMs": 238115,
+      "turn": 4,
+      "phase": "MAIN2",
+      "activePlayer": 1,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair",
+          "Swamp"
+        ]
+      ],
+      "life": [
+        20,
+        19
+      ]
+    },
+    {
+      "tMs": 238167,
+      "turn": 4,
+      "phase": "MAIN2",
+      "activePlayer": 1,
+      "stack": [
+        "Splinter, Hamato Yoshi"
+      ],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair",
+          "Swamp"
+        ]
+      ],
+      "life": [
+        20,
+        19
+      ]
+    },
+    {
+      "tMs": 238538,
+      "turn": 4,
+      "phase": "MAIN2",
+      "activePlayer": 1,
+      "stack": [
+        "Splinter, Hamato Yoshi"
+      ],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair",
+          "Swamp"
+        ]
+      ],
+      "life": [
+        20,
+        19
+      ]
+    },
+    {
+      "tMs": 238590,
+      "turn": 5,
+      "phase": "MAIN1",
+      "activePlayer": 0,
+      "stack": [],
+      "battlefield": [
+        [
+          "Plains",
+          "Suntail Hawk",
+          "Island",
+          "Glory Seeker"
+        ],
+        [
+          "Hidden Lair",
+          "Swamp",
+          "Splinter, Hamato Yoshi"
+        ]
+      ],
+      "life": [
+        20,
+        19
+      ]
+    }
+  ]
+}

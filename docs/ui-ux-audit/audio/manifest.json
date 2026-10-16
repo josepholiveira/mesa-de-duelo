@@ -1,0 +1,98 @@
+{
+  "status": "Concept sketches; not integrated into Mesa de Duelo",
+  "source": "Original deterministic procedural synthesis. No external samples or Arena audio.",
+  "verification": "PCM format, durations, peak levels, clipping and filenames checked. Aesthetic listening review not performed by the generating agent.",
+  "sounds": [
+    {
+      "file": "01-card-draw.wav",
+      "durationSeconds": 0.34,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -11.7,
+      "rmsDbFS": -24.3,
+      "clippedSamples": 0,
+      "sha256": "b13423394cfe211ccbb9dd1a2fda8bd0ed34c886cbbdd28d22e9c695e05c58da",
+      "title": "Card draw",
+      "description": "A short parchment scrape with a soft leather edge."
+    },
+    {
+      "file": "02-card-play.wav",
+      "durationSeconds": 0.38,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -7.96,
+      "rmsDbFS": -23.25,
+      "clippedSamples": 0,
+      "sha256": "c195d40a2778ef15acf87ae5212e111c0d9fff440a0c1219a99946532aa31c95",
+      "title": "Card play",
+      "description": "A compact leather-on-wood placement, warmer than a click."
+    },
+    {
+      "file": "03-land.wav",
+      "durationSeconds": 0.6,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -6.74,
+      "rmsDbFS": -20.94,
+      "clippedSamples": 0,
+      "sha256": "afbd09f7859d65d5af6b25f0fff42fac7a149c16a1ede4d1408e43ca0e9539ac",
+      "title": "Land enters",
+      "description": "A low wooden body and a tiny stone texture."
+    },
+    {
+      "file": "04-cast.wav",
+      "durationSeconds": 0.95,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -8.4,
+      "rmsDbFS": -22.77,
+      "clippedSamples": 0,
+      "sha256": "64959367a90d6ea2fbaaf932c39ea667286834d14a3dd6c2a90c9ffdf4018f1e",
+      "title": "Spell cast",
+      "description": "A breath of air into a muted, inharmonic metal resonance."
+    },
+    {
+      "file": "05-impact.wav",
+      "durationSeconds": 0.68,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -5.68,
+      "rmsDbFS": -22.79,
+      "clippedSamples": 0,
+      "sha256": "6cdc1b10deff075bea78864b3cabdfbe06dc0ea60e2182ce2e4b4e643e83f26f",
+      "title": "Combat impact",
+      "description": "A short drum-like thud with dull metal and rough texture."
+    },
+    {
+      "file": "06-turn.wav",
+      "durationSeconds": 1.0,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -9.63,
+      "rmsDbFS": -23.14,
+      "clippedSamples": 0,
+      "sha256": "003e4257ceeed09ac6005b5cc2457ef29f639e99d0bdc2a4dbaf153096b36ddf",
+      "title": "Your turn",
+      "description": "Two restrained bronze-like notes, rising by a fourth."
+    },
+    {
+      "file": "07-wing.wav",
+      "durationSeconds": 0.7,
+      "sampleRate": 44100,
+      "channels": 2,
+      "bitsPerSample": 16,
+      "peakDbFS": -13.15,
+      "rmsDbFS": -26.77,
+      "clippedSamples": 0,
+      "sha256": "f61cba438ca8569deeb1da8a83eb65c02707a634fa1096a3a6057b2ec642a140",
+      "title": "Flying cue",
+      "description": "A brief airy wing gesture. Intended for an ability change, not an idle loop."
+    }
+  ]
+}
