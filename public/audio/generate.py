@@ -1,109 +1,252 @@
 #!/usr/bin/env python3
-"""Original tactile fantasy cues. Deterministic standard-library PCM synthesis, no samples."""
+"""Deterministic game cues. Standard library only; twelve original physical-model cues.
+
+The two damage cues adapt bundled SFXMint-generated CC0 takes. Their checksums,
+licenses and generation provenance are recorded in sources/manifest.json; regeneration needs no network.
+
+Actions use different materials, envelopes and rhythms. Playback pitch variation is
+only a finishing detail, not the source of their identity.
+"""
 from pathlib import Path
+from functools import lru_cache
 import array
 import hashlib
 import json
 import math
 import random
+import sys
 import wave
 
 RATE = 44100
 OUT = Path(__file__).resolve().parent
-OUT.mkdir(parents=True, exist_ok=True)
 TAU = math.tau
 
 
-def noise(duration, cutoff, seed=1):
+def add_texture(buf, start, duration, band, amplitude, seed, envelope):
+    """Band-limited friction, independently seeded for each material and layer."""
     rng = random.Random(seed)
-    a = 1 - math.exp(-TAU * cutoff / RATE)
-    state = 0.0
-    out = []
-    for _ in range(round(duration * RATE)):
-        state += a * (rng.uniform(-1, 1) - state)
-        out.append(state)
-    return out
+    low = high = smooth = rounded = 0.0
+    a = 1 - math.exp(-TAU * band[0] / RATE)
+    b = 1 - math.exp(-TAU * band[1] / RATE)
+    offset = round(start * RATE)
+    for i in range(min(round(duration * RATE), len(buf) - offset)):
+        sample = rng.uniform(-1, 1)
+        high += b * (sample - high)
+        smooth += b * (high - smooth)
+        rounded += b * (smooth - rounded)
+        low += a * (rounded - low)
+        buf[offset + i] += (rounded - low) * amplitude * envelope(i / RATE)
 
 
-def modes(t, fundamental, decay, amplitude=1.0, metallic=False):
-    ratios = [1, 1.51, 2.11, 2.76, 3.47] if metallic else [1, 1.57, 2.33, 3.61]
-    weights = [1, .32, .18, .10, .06] if metallic else [1, .27, .13, .055]
-    return amplitude * sum(w * math.sin(TAU * fundamental * ratio * t) * math.exp(-t / (decay / (1 + i * .45))) for i, (ratio, w) in enumerate(zip(ratios, weights)))
-
-
-def envelope(t, duration, attack=.01):
-    return min(1, t / attack) * min(1, max(0, duration - t) / .04)
-
-
-def render(name, duration, formula, peak=.50):
-    low = noise(duration, 650, seed=11)
-    mid = noise(duration, 3600, seed=11)
-    air = noise(duration, 8000, seed=11)
-    mono = []
-    for i in range(len(low)):
+def add_modes(buf, start, modes, amplitude=1.0, attack=.002):
+    """Damped resonances: each material supplies its own frequencies and decay."""
+    offset = round(start * RATE)
+    for i in range(len(buf) - offset):
         t = i / RATE
-        sample = formula(t, low[i], mid[i] - low[i], air[i] - mid[i])
-        mono.append(sample * envelope(t, duration, .003))
+        buf[offset + i] += amplitude * min(1, t / attack) * sum(
+            weight * math.sin(TAU * frequency * t) * math.exp(-t / decay)
+            for frequency, weight, decay in modes)
+
+
+def add_drum(buf, start, frequency, sweep, decay, amplitude):
+    offset = round(start * RATE)
+    for i in range(len(buf) - offset):
+        t = i / RATE
+        phase = TAU * (frequency * t + sweep * .025 * (1 - math.exp(-t / .025)))
+        buf[offset + i] += amplitude * math.sin(phase) * math.exp(-t / decay) * min(1, t / .003)
+
+
+def bell(t, center, width):
+    return math.exp(-((t - center) / width) ** 2)
+
+
+def draw(buf):
+    # Two uneven paper strokes, fine corrugation and a tiny edge flick. No tone.
+    add_texture(buf, 0, .28, (1050, 6300), 1.3, 101,
+                lambda t: (bell(t, .055, .035) + .60 * bell(t, .17, .055)) * (.72 + .28 * math.sin(TAU * 83 * t) ** 2))
+    add_texture(buf, .205, .055, (1800, 7700), .24, 102, lambda t: math.exp(-t / .009))
+
+
+def placement(buf):
+    # Leather on a felt-covered table, deliberately short and quiet.
+    add_texture(buf, 0, .10, (160, 1600), .9, 201, lambda t: math.exp(-t / .025))
+    add_modes(buf, .004, [(178, .55, .027), (306, .19, .018), (487, .07, .011)])
+
+
+def land(buf):
+    # Broad wooden contact followed by a small, separate stone tick.
+    add_modes(buf, 0, [(94, 1, .095), (173, .32, .052), (281, .13, .030)])
+    add_texture(buf, 0, .12, (65, 950), 1.25, 301, lambda t: math.exp(-t / .035))
+    add_modes(buf, .085, [(710, .22, .025), (1193, .12, .014)], attack=.001)
+    add_texture(buf, .07, .16, (800, 3000), .22, 302, lambda t: bell(t, .035, .025))
+
+
+def cast(buf):
+    # A short staff-like strike anchors the growing air and glass/metal fifth.
+    add_drum(buf, .025, 126, 24, .045, .57)
+    add_modes(buf, .025, [(221, .16, .035), (487, .08, .023)], attack=.002)
+    add_texture(buf, .025, .08, (140, 1500), .30, 403, lambda t: math.exp(-t / .016))
+    add_texture(buf, 0, .46, (450, 4300), .85, 401, lambda t: bell(t, .18, .11))
+    add_modes(buf, .19, [(659.25, .36, .23), (987.77, .23, .25), (1760, .055, .10)], attack=.055)
+    add_modes(buf, .29, [(1318.5, .08, .17), (1975.5, .025, .11)], attack=.045)
+
+
+@lru_cache(maxsize=2)
+def damage_source(cue):
+    """Use only the exact licensed source recorded with the repository."""
+    source = json.loads((OUT / 'sources/manifest.json').read_text())['sources'][cue]
+    path = OUT / 'sources' / source['file']
+    data = path.read_bytes()
+    if source['license'] != 'CC0-1.0' or hashlib.sha256(data).hexdigest() != source['sha256']:
+        raise ValueError('Damage source license/checksum does not match its manifest')
+    with wave.open(str(path), 'rb') as wav:
+        if wav.getframerate() != RATE or wav.getnchannels() != 2 or wav.getsampwidth() != 2:
+            raise ValueError('Damage source must be stereo 44.1 kHz PCM16')
+        pcm = array.array('h', wav.readframes(wav.getnframes()))
+    if sys.byteorder != 'little':
+        pcm.byteswap()
+    mono = [(pcm[i] + pcm[i + 1]) / 65534 for i in range(0, len(pcm), 2)]
+    # Remove pre-roll, retaining 1 ms before the first meaningful transient.
+    peak = max(map(abs, mono))
+    onset = next(i for i, sample in enumerate(mono) if abs(sample) >= peak * .025)
+    return mono[max(0, onset - round(.001 * RATE)):]
+
+
+def add_explosion(buf, cue, speed, cutoff, decay, amplitude):
+    source = damage_source(cue)
+    a = 1 - math.exp(-TAU * cutoff / RATE)
+    filtered = smooth = 0.0
+    for i in range(len(buf)):
+        position = i * speed
+        at = int(position)
+        if at + 1 >= len(source):
+            break
+        sample = source[at] + (source[at + 1] - source[at]) * (position - at)
+        filtered += a * (sample - filtered)
+        smooth += a * (filtered - smooth)
+        t = i / RATE
+        tail = min(1, (len(buf) - i - 1) / (RATE * .12))
+        buf[i] += smooth * math.exp(-t / decay) * tail * amplitude
+
+
+def creature_hit(buf):
+    # Fast, dry little explosion; the source burst supplies the material.
+    add_explosion(buf, 'creature', speed=1.65, cutoff=4400, decay=.22, amplitude=1.8)
+    add_drum(buf, 0, 116, 46, .026, .08)
+
+
+def your_turn(buf):
+    # Three rising drum/wood strikes, ending in bronze: short-short-emphatic.
+    for start, note, amplitude, seed in [(0, 88, .62, 601), (.105, 118, .72, 602), (.255, 164, 1, 603)]:
+        add_drum(buf, start, note, 30, .085, amplitude)
+        add_modes(buf, start, [(note * 2.1, .23, .050), (note * 3.7, .09, .025)], amplitude)
+        add_texture(buf, start, .095, (160, 1900), .33 * amplitude, seed, lambda t: math.exp(-t / .018))
+    add_modes(buf, .255, [(392, .28, .17), (653, .13, .11), (1081, .05, .065)], attack=.003)
+
+
+def wing(buf):
+    add_texture(buf, 0, .51, (180, 1700), 1, 701,
+                lambda t: bell(t, .12, .065) + .62 * bell(t, .31, .085))
+
+
+def player_hit(buf):
+    # Slower blast with low body and a brief rumble; never used for life payment.
+    add_explosion(buf, 'player', speed=.82, cutoff=2900, decay=.48, amplitude=1.6)
+    add_drum(buf, .012, 44, 29, .14, .12)
+    add_modes(buf, .012, [(98, .07, .13), (151, .025, .08)], attack=.004)
+
+
+def opponent_turn(buf):
+    # Two slower descending war-drum strikes; a dull shield edge, no melody.
+    for start, note, amplitude, seed in [(0, 73, .76, 901), (.31, 51, 1, 902)]:
+        add_drum(buf, start, note, 37, .145, amplitude)
+        add_modes(buf, start, [(note * 2.2, .33, .11), (note * 3.9, .13, .065)], amplitude)
+        add_texture(buf, start, .13, (70, 1250), .55 * amplitude, seed, lambda t: math.exp(-t / .028))
+    add_modes(buf, .31, [(307, .11, .055), (519, .045, .035)], attack=.002)
+
+
+def ability(buf):
+    # Uneven ratchet teeth and a spring latch: three dry mechanical transients.
+    for start, amplitude, seed in [(0, .75, 1001), (.046, .50, 1002), (.123, 1, 1003)]:
+        add_texture(buf, start, .044, (850, 3900), amplitude, seed, lambda t: math.exp(-t / .006))
+        add_modes(buf, start, [(1260, .12, .009), (1860, .065, .006)], amplitude, attack=.001)
+    add_modes(buf, .123, [(395, .13, .032)], attack=.001)
+
+
+def resolved(buf):
+    # A fabric/air settling gesture, not a repeated bell after every spell.
+    add_texture(buf, 0, .25, (160, 1900), .8, 1101,
+                lambda t: bell(t, .045, .028) + .23 * bell(t, .13, .045))
+
+
+def countered(buf):
+    # Inward suction ends in a dry glass cut, without a descending beep.
+    add_texture(buf, 0, .18, (600, 4600), .8, 1201, lambda t: (t / .18) ** 1.6)
+    add_texture(buf, .18, .07, (1600, 6500), .8, 1202, lambda t: math.exp(-t / .009))
+    add_modes(buf, .18, [(1680, .13, .015), (2715, .06, .010)], attack=.001)
+
+
+def attack(buf):
+    # Forward cloth-and-air rush, increasing movement instead of an impact.
+    add_texture(buf, 0, .40, (130, 2600), 1, 1301,
+                lambda t: bell(t, .235, .095) * (.80 + .20 * math.sin(TAU * (13 * t + 32 * t * t))))
+    add_texture(buf, .09, .22, (2200, 5200), .16, 1302, lambda t: bell(t, .145, .05))
+
+
+def block(buf):
+    # Shield edge: bright inharmonic plate with a wooden contact underneath.
+    add_modes(buf, 0, [(541, .50, .12), (913, .31, .10), (1478, .20, .075), (2123, .11, .05)], attack=.0015)
+    add_modes(buf, 0, [(158, .20, .028)], attack=.002)
+    add_texture(buf, 0, .06, (600, 4400), .6, 1401, lambda t: math.exp(-t / .008))
+
+
+# file, material, duration, peak, reflection amount, composer
+DESIGNS = [
+    ('01-card-draw', 'paper / two brushed strokes', .30, .28, 0, draw),
+    ('02-card-play', 'leather / soft placement', .23, .25, 0, placement),
+    ('03-land', 'wood then stone / double contact', .48, .44, .025, land),
+    ('04-cast', 'staff strike then air and glass / grounded bloom', .88, .40, .10, cast),
+    ('05-impact', 'SFXMint explosion / compact fiery burst', .46, .46, .015, creature_hit),
+    ('06-turn', 'drum, wood and bronze / three rising strikes', .94, .44, .065, your_turn),
+    ('07-wing', 'cloth and air / two flutters', .53, .25, .015, wing),
+    ('08-player-hit', 'SFXMint explosion / deeper blast and short rumble', .92, .50, .045, player_hit),
+    ('09-opponent-turn', 'war drum and dull shield / two descending strikes', 1.04, .46, .06, opponent_turn),
+    ('10-ability', 'ratchet and latch / three irregular clicks', .29, .31, 0, ability),
+    ('11-resolved', 'fabric and air / quiet settle', .27, .18, 0, resolved),
+    ('12-countered', 'suction and glass cut / swell then snap', .37, .36, .015, countered),
+    ('13-attack', 'leather and air / forward rush', .43, .35, .03, attack),
+    ('14-block', 'shield plate / bright contact', .52, .40, .045, block),
+]
+
+
+def render(name, material, duration, peak, room, compose):
+    mono = [0.0] * round(duration * RATE)
+    compose(mono)
     mean = sum(mono) / len(mono)
-    mono = [s - mean for s in mono]
-    left, right = [], []
-    delays = [(int(RATE * .019), .055), (int(RATE * .037), .035), (int(RATE * .061), .018)]
-    for i, s in enumerate(mono):
-        room = sum(mono[i - d] * gain for d, gain in delays if i >= d)
-        end = min(1, (len(mono) - i - 1) / (RATE * .025))
-        left.append((s + room) * end)
-        right.append((s + sum(mono[i - d - 73] * gain for d, gain in delays if i >= d + 73)) * end)
-    maximum = max(abs(v) for ch in [left, right] for v in ch) or 1
-    gain = peak / maximum
-    pcm = array.array('h')
-    for a, b in zip(left, right):
-        pcm.extend([round(a * gain * 32767), round(b * gain * 32767)])
-    path = OUT / f"{name}.wav"
+    mono = [(sample - mean) * min(1, i / (RATE * .002), (len(mono) - i - 1) / (RATE * .022))
+            for i, sample in enumerate(mono)]
+    channels = []
+    for offset in [0, 97]:
+        reflections = [(round(RATE * .029) + offset, room), (round(RATE * .071) + offset, room * .45)]
+        channels.append([(sample + sum(mono[i - d] * gain for d, gain in reflections if i >= d))
+                         * min(1, (len(mono) - i - 1) / (RATE * .015)) for i, sample in enumerate(mono)])
+    gain = peak / (max(abs(sample) for channel in channels for sample in channel) or 1)
+    pcm = array.array('h', (round(sample * gain * 32767) for pair in zip(*channels) for sample in pair))
+    rms = math.sqrt(sum((sample / 32767) ** 2 for sample in pcm) / len(pcm))
+    clipped = sum(abs(sample) >= 32767 for sample in pcm)
+    if sys.byteorder != 'little':
+        pcm.byteswap()
+    path = OUT / f'{name}.wav'
     with wave.open(str(path), 'wb') as wav:
         wav.setnchannels(2)
         wav.setsampwidth(2)
         wav.setframerate(RATE)
         wav.writeframes(pcm.tobytes())
-    rms = math.sqrt(sum((s / 32767) ** 2 for s in pcm) / len(pcm))
-    return {"file": path.name, "durationSeconds": round(len(left) / RATE, 3), "sampleRate": RATE, "channels": 2, "bitsPerSample": 16, "peakDbFS": round(20 * math.log10(peak), 2), "rmsDbFS": round(20 * math.log10(rms), 2), "clippedSamples": sum(abs(s) == 32767 for s in pcm), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {'file': path.name, 'material': material, 'durationSeconds': duration,
+            'peakDbFS': round(20 * math.log10(peak), 2), 'rmsDbFS': round(20 * math.log10(rms), 2),
+            'clippedSamples': clipped, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-designs = [
-    ("01-card-draw", "Card draw", "A short parchment scrape with a soft leather edge.", .34, lambda t, lo, band, air: .75 * band * (math.sin(math.pi * min(1, t / .27)) ** 1.2) * math.exp(-t * 5) + .16 * modes(t, 280, .026) + .03 * air * math.exp(-t * 16), .26),
-    ("02-card-play", "Card play", "A compact leather-on-wood placement, warmer than a click.", .38, lambda t, lo, band, air: .65 * modes(t, 145, .052) + .37 * lo * math.exp(-t * 30) + .20 * band * math.exp(-t * 60), .40),
-    ("03-land", "Land enters", "A low wooden body and a tiny stone texture.", .60, lambda t, lo, band, air: .8 * modes(t, 82, .105) + .13 * modes(t, 295, .07, metallic=True) + .38 * lo * math.exp(-t * 22) + .1 * band * math.exp(-t * 55), .46),
-    ("04-cast", "Spell cast", "A breath of air into a muted, inharmonic metal resonance.", .95, lambda t, lo, band, air: .3 * band * math.sin(math.pi * min(1, t / .48)) ** 2 * math.exp(-t * 3) + (0 if t < .14 else .5 * modes(t - .14, 206, .25, metallic=True) * min(1, (t - .14) / .055)), .38),
-    ("05-impact", "Combat impact", "A short drum-like thud with dull metal and rough texture.", .68, lambda t, lo, band, air: .85 * math.sin(TAU * (70 * t + 22 * .025 * (1 - math.exp(-t / .025)))) * math.exp(-t / .10) + .28 * modes(t, 220, .12, metallic=True) + .65 * lo * math.exp(-t / .08) + .25 * band * math.exp(-t / .018), .52),
-    ("06-turn", "Your turn", "Two restrained bronze-like notes, rising by a fourth.", 1.0, lambda t, lo, band, air: .4 * modes(t, 196, .19, metallic=True) * min(1, t / .015) + (0 if t < .20 else .48 * modes(t - .20, 261.63, .21, metallic=True) * min(1, (t - .20) / .02)), .33),
-    ("07-wing", "Flying cue", "A brief airy wing gesture. Intended for an ability change, not an idle loop.", .70, lambda t, lo, band, air: (.32 * band + .08 * air + .18 * lo) * (math.exp(-((t - .18) / .09) ** 2) + .65 * math.exp(-((t - .39) / .095) ** 2)), .22),
-]
-
-# This low drum/wood cue is reserved for damage to a player, never life payments.
-designs.append(("08-player-hit", "Player damage", "A deep, short body hit with a muted bronze tail.", .84,
-    lambda t, lo, band, air: 1.1 * math.sin(TAU * (48 * t + 35 * .035 * (1 - math.exp(-t / .035)))) * math.exp(-t / .14)
-    + .30 * modes(t, 109, .17, metallic=True) + .60 * lo * math.exp(-t / .10) + .16 * band * math.exp(-t / .014), .48))
-
-designs.extend([
-    ("09-opponent-turn", "Opponent turn", "Two low wooden knocks descend, clearly separate from your rising bronze notes.", .82,
-     lambda t, lo, band, air: .65 * modes(t, 118, .11) + .15 * lo * math.exp(-t / .055)
-     + (0 if t < .22 else .62 * modes(t - .22, 88, .14) * min(1, (t - .22) / .006)), .35),
-    ("10-ability", "Ability activation", "A small wooden ratchet and a short resonant mechanism; less dramatic than a spell.", .48,
-     lambda t, lo, band, air: .45 * modes(t, 330, .052) + .18 * band * math.exp(-t / .018)
-     + (0 if t < .085 else .32 * modes(t - .085, 440, .065, metallic=True) * min(1, (t - .085) / .004)), .34),
-    ("11-resolved", "Resolution", "A soft struck glass-and-bronze settling note with a short tail.", .60,
-     lambda t, lo, band, air: .36 * modes(t, 392, .15, metallic=True) * min(1, t / .008)
-     + .13 * modes(t, 196, .08) + .08 * band * math.exp(-t / .035), .29),
-    ("12-countered", "Countered spell", "A dry metal snap cuts through a collapsing breath of magic.", .56,
-     lambda t, lo, band, air: .42 * modes(t, 570, .045, metallic=True) + .32 * band * math.exp(-t / .024)
-     + .24 * lo * math.exp(-t / .12) + .22 * math.sin(TAU * (190 * t - 85 * t * t)) * math.exp(-t / .11), .39),
-    ("13-attack", "Attack declared", "A leather-and-air forward sweep followed by a restrained wooden strike.", .48,
-     lambda t, lo, band, air: (.38 * band + .18 * lo + .045 * air) * math.exp(-((t - .11) / .07) ** 2)
-     + (0 if t < .16 else .50 * modes(t - .16, 135, .065) * min(1, (t - .16) / .004)), .39),
-    ("14-block", "Block declared", "A compact shield-like wood-and-metal contact, distinct from damage.", .42,
-     lambda t, lo, band, air: .48 * modes(t, 240, .07, metallic=True) + .56 * modes(t, 105, .05)
-     + .22 * band * math.exp(-t / .016), .42),
-])
-
-if __name__ == "__main__":
-    for filename, title, description, duration, formula, peak in designs:
-        print(json.dumps(render(filename, duration, formula, peak)))
+if __name__ == '__main__':
+    for design in DESIGNS:
+        print(json.dumps(render(*design)))

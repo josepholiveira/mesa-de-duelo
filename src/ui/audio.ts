@@ -10,8 +10,9 @@ export const SOUND_FILES = {
 export type SoundCue = keyof typeof SOUND_FILES;
 const SETTINGS_KEY = 'mesa:audio:v1';
 const MAX_VOICES = 4;
-// Four simultaneous full-volume cues remain below digital full scale.
-const MIX_HEADROOM = .42;
+const SOUND_REVISION = 'materials-4';
+// Includes the StereoPanner's correlated-channel crossfeed at the maximum pan.
+export const MIX_HEADROOM = .40;
 
 export function soundForEvent(event: PresentationEvent, you?: number): SoundCue | null {
   switch (event.type) {
@@ -21,7 +22,7 @@ export function soundForEvent(event: PresentationEvent, you?: number): SoundCue 
     case 'ability-activated': return 'ability';
     case 'resolved': return 'resolved';
     case 'countered': return 'countered';
-    case 'entered': return event.card?.keywords?.includes('FLYING') ? 'wing' : 'play';
+    case 'entered': return event.card?.land ? 'land' : event.card?.keywords?.includes('FLYING') ? 'wing' : 'play';
     case 'attackers': return 'attack';
     case 'blockers': return 'block';
     case 'damage': return event.targets?.players?.length ? 'player-hit' : 'impact';
@@ -65,6 +66,33 @@ export class AudioEventGate {
   }
 }
 
+/** Prefer an effect's own material over a generic second sound for its resolution. */
+export class AudioEventMix {
+  private matchId = '';
+  private outcomes = new Map<number, number>();
+  private draw: { seq: number; actor?: number } | null = null;
+  level(event: PresentationEvent, matchId: string) {
+    if (matchId !== this.matchId) { this.matchId = matchId; this.outcomes.clear(); this.draw = null; }
+    const source = event.sourceId ?? event.card?.id;
+    if (event.type === 'spell-cast' || event.type === 'ability-activated') this.draw = null;
+    if (source !== undefined) {
+      if (event.type === 'spell-cast' || event.type === 'ability-activated') this.outcomes.delete(source);
+      if (['damage', 'entered', 'countered'].includes(event.type)) {
+        this.outcomes.set(source, event.seq);
+        if (this.outcomes.size > 64) this.outcomes.delete(this.outcomes.keys().next().value!);
+      }
+    }
+    if (event.type === 'draw') { this.draw = { seq: event.seq, actor: event.actor }; return .85; }
+    if (event.type === 'resolved') {
+      const outcome = source === undefined ? undefined : this.outcomes.get(source);
+      const ownOutcome = outcome !== undefined && outcome < event.seq && event.seq - outcome <= 24;
+      const justDrew = this.draw?.actor !== undefined && this.draw.actor === event.actor && event.seq > this.draw.seq && event.seq - this.draw.seq <= 3;
+      return ownOutcome || justDrew ? 0 : .55;
+    }
+    return event.type === 'entered' && !event.card?.land ? .75 : 1;
+  }
+}
+
 export function createGameAudio() {
   let stored: Partial<AudioSettings> | null = null;
   try { stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null'); } catch { /* Storage is optional. */ }
@@ -76,6 +104,7 @@ export function createGameAudio() {
   const loading = new Map<SoundCue, Promise<void>>();
   const voices = new Set<AudioBufferSourceNode>();
   const gate = new AudioEventGate();
+  const mix = new AudioEventMix();
 
   function save() {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Storage is optional. */ }
@@ -90,7 +119,7 @@ export function createGameAudio() {
     await Promise.allSettled((Object.keys(SOUND_FILES) as SoundCue[]).map(cue => {
       if (buffers.has(cue)) return Promise.resolve();
       if (loading.has(cue)) return loading.get(cue)!;
-      const pending = fetch(`${import.meta.env.BASE_URL}audio/${SOUND_FILES[cue]}`)
+      const pending = fetch(`${import.meta.env.BASE_URL}audio/${SOUND_FILES[cue]}?v=${SOUND_REVISION}`)
         .then(r => { if (!r.ok) throw new Error('Audio unavailable'); return r.arrayBuffer(); })
         .then(data => ctx.decodeAudioData(data))
         .then(buffer => { buffers.set(cue, buffer); })
@@ -140,6 +169,8 @@ export function createGameAudio() {
       if (!allowed || !cue || !context || !master) return;
       const buffer = buffers.get(cue);
       if (!buffer) { void preload(); return; }
+      const level = mix.level(event, matchId);
+      if (!level) return;
       if (voices.size >= MAX_VOICES) {
         const oldest = voices.values().next().value!;
         oldest.stop(); voices.delete(oldest);
@@ -150,7 +181,7 @@ export function createGameAudio() {
       const variation = soundVariation(event, matchId, you);
       source.buffer = buffer;
       source.playbackRate.value = variation.rate;
-      gain.gain.value = variation.gain;
+      gain.gain.value = variation.gain * level;
       pan.pan.value = variation.pan;
       source.connect(gain); gain.connect(pan); pan.connect(master);
       voices.add(source);

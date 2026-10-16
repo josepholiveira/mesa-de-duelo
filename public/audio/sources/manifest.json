@@ -1,0 +1,42 @@
+{
+  "sources": {
+    "creature": {
+      "file": "sfxmint-fireburst-take-4.wav",
+      "title": "Generated magical fireburst — take 4",
+      "creator": "SFXMint AI Studio",
+      "page": "https://sfxmint.com/studio",
+      "generationId": "ord_1697817b50327a1d71a7867c",
+      "take": 4,
+      "sha256": "1c80ef3015b3b5f6a7e6b07d5b32c4da81b5507faf200cb2b00939ee32837f9a",
+      "bytes": 127656,
+      "license": "CC0-1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "termsUrl": "https://sfxmint.com/license",
+      "retrieved": "2026-10-16"
+    },
+    "player": {
+      "file": "sfxmint-fireburst-take-1.wav",
+      "title": "Generated magical fireburst — take 1",
+      "creator": "SFXMint AI Studio",
+      "page": "https://sfxmint.com/studio",
+      "generationId": "ord_1697817b50327a1d71a7867c",
+      "take": 1,
+      "sha256": "6ddcea5af5fe47fea2aa12f445a00057724f0f95c23d4ec407da6b39f4380773",
+      "bytes": 123432,
+      "license": "CC0-1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "termsUrl": "https://sfxmint.com/license",
+      "retrieved": "2026-10-16"
+    }
+  },
+  "generation": {
+    "method": "Official website anonymous free generation; no account or purchase",
+    "enhancedPrompt": "TrackType: SFX, a compact magical fire explosion, a sharp fiery crack opens into a brief gritty burst, with a punchy low thump and a short dry ember tail."
+  },
+  "derivatives": {
+    "05-impact.wav": "Take 4: onset trim, faster compact burst, low-pass filtering, short envelope and light physical impact layer.",
+    "08-player-hit.wav": "Take 1: onset trim, slower deeper burst, low-pass filtering, longer envelope and restrained low-body layer."
+  },
+  "regenerate": "python3 public/audio/generate.py",
+  "notes": "The two original generated takes are bundled for deterministic offline regeneration. The other twelve cues use original procedural synthesis. Generated audio was downloaded through the Studio interface; no permanent public download URL was supplied."
+}

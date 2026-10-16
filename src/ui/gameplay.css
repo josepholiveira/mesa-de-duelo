@@ -1,5 +1,5 @@
 /* The table stays spatial: cards occupy the mat; the stack only opens for pending effects. */
-.forge { grid-template-columns: minmax(0, 1fr); --ch: clamp(88px, 14.5vh, 160px); --cw: calc(var(--ch) * .716); --lch: clamp(62px, 9.5vh, 105px); --lcw: calc(var(--lch) * .716); }
+.forge { --hand-right: 300px; --exile-card-width: var(--hcw); --exile-width: calc(var(--exile-visible, 1) * var(--exile-card-width) + (var(--exile-visible, 1) - 1) * 12px + 16px); grid-template-columns: minmax(0, 1fr); --ch: clamp(88px, 14.5vh, 160px); --cw: calc(var(--ch) * .716); --lch: clamp(62px, 9.5vh, 105px); --lcw: calc(var(--lch) * .716); }
 .forge .mat { background: repeating-linear-gradient(60deg, #ffffff04 0 2px, transparent 2px 26px), repeating-linear-gradient(-60deg, #ffffff04 0 2px, transparent 2px 26px), radial-gradient(ellipse at 50% 50%, var(--mat-center), var(--mat-mid) 45%, var(--bg-deep) 92%); }
 .forge .field { min-width: 0; padding: 0 58px; gap: 0; overflow-x: hidden; overflow-y: auto; justify-content: safe center; }
 .forge.has-stack .field { padding-right: min(275px, 25vw); }
@@ -18,7 +18,7 @@
 @keyframes flying-mist { from { transform: translateX(-4px) scale(.93); opacity: .3; } to { transform: translateX(4px) scale(1.08); opacity: .65; } }
 .inspect-card { display: grid; place-items: center; position: absolute; z-index: 7; left: -7px; top: -9px; width: 28px; height: 28px; padding: 5px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: zoom-in; }
 .inspect-card svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.forge .hand { left: 190px; right: 300px; transform: none; max-width: none; justify-content: safe center; height: clamp(144px, 23vh, 215px); overflow-x: auto; overflow-y: hidden; padding: 22px 12px 7px; align-items: flex-end; scrollbar-width: thin; }
+.forge .hand { left: 190px; right: var(--hand-right); transform: none; max-width: none; justify-content: safe center; height: clamp(144px, 23vh, 215px); overflow-x: auto; overflow-y: hidden; padding: 22px 12px 7px; align-items: flex-end; scrollbar-width: thin; }
 .hand-slot { position: relative; width: clamp(74px, 13.5vh, 126px); height: calc(clamp(74px, 13.5vh, 126px) / .716); flex: 0 0 auto; margin-left: -12px; }
 .hand-slot:first-child { margin-left: 0; }
 .forge .hand-slot .hcard { width: 100%; height: 100%; --fw: clamp(74px, 13.5vh, 126px); transform: none; margin: 0; }
@@ -39,6 +39,40 @@
 .hand-drag-ghost .face { height: 100%; outline: 2px solid var(--gold); }
 .forge.dragging-hand { user-select: none; cursor: grabbing; }
 .forge.dragging-hand .field { outline: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); outline-offset: -8px; }
+
+/* Exile remains separate from the hand, even while the permission cannot currently be used. */
+.forge.has-exile-shelf .hand { right: calc(var(--hand-right) + var(--exile-width) + 20px); }
+.forge.has-exile-shelf .hand:not(.crowded) .hand-slot + .hand-slot { margin-left: var(--shelf-hand-overlap, calc(var(--hcw) * -.34)); }
+.exile-shelf { position: absolute; right: var(--hand-right); bottom: 10px; z-index: 9; width: var(--exile-width); padding-top: 18px; }
+.exile-shelf-label { position: absolute; left: 8px; top: -1px; color: #e4e8f2; font: 600 12px var(--body); letter-spacing: .02em; }
+.exile-shelf-track { display: flex; gap: 12px; padding: 15px 8px 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #cbd2e1 transparent; scroll-padding: 8px; }
+.exile-slot { position: relative; flex: 0 0 var(--exile-card-width); width: var(--exile-card-width); }
+.exile-card { position: relative; width: 100%; aspect-ratio: 488 / 680; --fw: var(--exile-card-width); cursor: zoom-in; transition: transform 150ms cubic-bezier(.2, 0, 0, 1); }
+.exile-card > .face { outline: 1px solid #e5eaf1; outline-offset: 2px; box-shadow: 0 5px 15px #0008; }
+.exile-card.waiting > .face { filter: brightness(.72) saturate(.75); }
+.exile-card.playable { cursor: grab; touch-action: none; }
+.exile-card.playable > .face, .exile-card.suspend-ready > .face { outline-width: 2px; box-shadow: 0 0 18px #dce9ff44; }
+.exile-card.suspend-ready { cursor: pointer; }
+.exile-card.drag-source { opacity: .35; }
+.exile-time { position: absolute; top: -8px; right: -4px; display: flex; align-items: center; gap: 3px; padding: 4px 6px; border-radius: 99px; background: var(--bg-deep); border: 1px solid #dfe6f2; color: var(--ink); font: 600 13px var(--body); }
+.exile-time svg { width: 13px; height: 13px; }
+.exile-status { position: absolute; left: 4px; right: 4px; bottom: 4px; padding: 5px 3px; border-radius: 4px; background: #071020eb; color: #e4e8f2; text-align: center; font: 500 10px/1.3 var(--body); }
+.exile-slot .inspect-card { top: -9px; left: -5px; }
+.exile-slot:hover > .inspect-card, .exile-slot:focus-within > .inspect-card { opacity: 1; }
+.exile-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 6px; transition: none; }
+.forge .bfc.block-candidate { cursor: pointer; }
+.forge .bfc.block-selected > .face { outline: 3px solid #f3f6ff; outline-offset: 3px; box-shadow: 0 0 18px #ffffff55; }
+.forge .bfc.block-target > .face { outline: 3px solid var(--gold); outline-offset: 3px; }
+.forge .tag.block-pending { background: #e9edf5; color: #101b2f; font-size: 10px; }
+@media (hover: hover) and (pointer: fine) { .exile-card:hover { transform: translateY(-6px); } }
+
+/* A check and a fixed outline distinguish a chosen cost from hover and eligibility. */
+.forge .choice-selected > .face { outline: 3px solid var(--gold); outline-offset: 3px; box-shadow: 0 0 0 5px #10192ad9, 0 0 16px #f4bf4f55; }
+.choice-check { position: absolute; z-index: 6; top: -8px; right: -8px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #1a2233; background: var(--gold); color: #1a2233; pointer-events: none; }
+.choice-check svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.slot.tapped .choice-check { transform: rotate(-90deg); }
+.selection-count { display: block; margin-top: 5px; color: var(--gold); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.exile-card.selectable { cursor: pointer; }
 
 .hand-slot .hcost { left: auto; right: 2px; font-size: 11px; }
 .forge .hand-slot .hzone { bottom: 3%; font-size: 11px; }
@@ -142,9 +176,9 @@
 .sideboard-error { color: var(--red)!important; padding: 10px; border: 1px solid var(--red); border-radius: 8px; }
 .sideboard-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
 @media (hover: hover) and (pointer: fine) { .inspect-card { opacity: 0; } .slot:hover > .inspect-card,.hand-slot:hover > .inspect-card,.stack-card-wrap:hover > .inspect-card,.inspect-card:focus-visible { opacity: 1; } }
-@media (max-width: 1100px) { .forge .field { padding-left: 18px; padding-right: 18px; } .forge .hand { left: 160px; right: 265px; } .forge .action { width: 235px; } }
+@media (max-width: 1100px) { .forge { --hand-right: 265px; } .forge .field { padding-left: 18px; padding-right: 18px; } .forge .hand { left: 160px; } .forge .action { width: 235px; } }
 @media (max-width: 760px), (max-height: 500px) {
-  .forge { grid-template-columns: minmax(0, 1fr); --ch: clamp(62px, 16vh, 104px); --cw: calc(var(--ch) * .716); --lch: clamp(42px, 10vh, 66px); --lcw: calc(var(--lch) * .716); }
+  .forge { --hand-right: 205px; --exile-card-width: 62px; grid-template-columns: minmax(0, 1fr); --ch: clamp(62px, 16vh, 104px); --cw: calc(var(--ch) * .716); --lch: clamp(42px, 10vh, 66px); --lcw: calc(var(--lch) * .716); }
   .forge .field { padding: 0 8px; }
   .forge.has-stack .field { padding-right: 190px; }
   .forge .row { min-height: calc(var(--ch) + 22px); padding: 12px 8px 10px; }
@@ -173,12 +207,16 @@
   .forge .arena-btn { padding: 8px 10px; font-size: 12px; }
   .forge .stack-panel h2 { font-size: 14px; }
   .forge .phase-rail { display: none; }
-  .forge .hand { height: 28vh; max-width: none; left: 75px; right: 205px; padding: 15px 6px 3px; }
+  .forge .hand { height: 28vh; max-width: none; left: 75px; padding: 15px 6px 3px; }
   .forge .hand:not(.crowded) .hand-slot { width: 62px; height: 87px; margin-left: -16px; }
   .forge .hand:not(.crowded) .hcard { --fw: 62px; }
   .hand-slot { width: 62px; height: 87px; margin-left: -6px; }
   .forge .hand-slot .hcard { --fw: 62px; }
   .forge .hand-slot .hcost { font-size: 9px; }
+  .exile-shelf { bottom: 4px; }
+  .exile-status { font-size: 9px; padding: 3px 1px; }
+  .exile-time { font-size: 11px; padding: 2px 4px; }
+  .exile-shelf-label { font-size: 11px; }
   .forge .portrait { width: 44px; height: 44px; }
   .forge .avatar-slot.me { left: 8px; }
   .forge .piles.me { display: none; }
@@ -190,4 +228,4 @@
   .series-score { font-size: 11px; padding: 0; }
   .sideboard-columns { grid-template-columns: 1fr; }
 }
-@media (prefers-reduced-motion: reduce) { .forge .slot.has-flying::before { animation: none; opacity: .45; } .stack-gallery-card { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .forge .slot.has-flying::before { animation: none; opacity: .45; } .stack-gallery-card, .exile-card { transition: none; } .exile-card:hover { transform: none; } }

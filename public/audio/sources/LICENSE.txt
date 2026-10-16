@@ -1,0 +1,10 @@
+Damage audio sources: SFXMint AI Studio, generated 2026-10-16
+License: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+https://sfxmint.com/license
+
+SFXMint dedicates generated sounds to CC0 and permits copying, modification,
+commercial use and redistribution. Attribution is not required; source credit
+is retained for provenance. No endorsement by SFXMint is implied.
+See manifest.json for the generation ID, prompt, verified SHA-256 hashes
+and modifications. The two adapted damage cues are produced by ../generate.py.

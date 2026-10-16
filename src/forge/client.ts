@@ -123,6 +123,10 @@ export interface FState {
   players: FPlayer[];
   /** Cartas do cemitério ou do exílio (de qualquer jogador) que você pode usar agora: flashback, tramadas... */
   castable?: number[];
+  /** Permissões vigentes para jogar do exílio, mesmo sem prioridade ou mana neste momento. */
+  playableExile?: number[];
+  /** Cartas suspensas e cartas cujo gatilho de suspender ainda está na pilha. */
+  suspendedExile?: number[];
   stack: { id: number; text: string; source?: FCard; controller?: number; targets?: FTargets }[];
   combat: { attacker: number; defender?: number; blockers: number[] }[];
   log: string[];
@@ -133,6 +137,12 @@ export interface FState {
   /** paying: pagando um custo de mana; a mana da reserva pode ser gasta com {type:"mana", color}. */
   /** targeting: escolhendo alvos; source é a carta que alveja (card traz os dados dela) e o resto são os alvos já escolhidos. */
   input: { gen: number; priority?: boolean; opening?: 'play-draw' | 'mulligan' | 'mulligan-bottom'; openingStartingPlayer?: number; openingReturnCount?: number; openingReturnRemaining?: number; openingSelected?: number[]; message: string; ok: FButton; cancel: FButton; selectable: number[]; selectableStacks?: number[]; selectablePlayers?: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
+    /** Cartas selecionadas pelo motor no prompt atual, com os limites reais da escolha. */
+    selection?: { cards: number[]; min: number; max: number };
+    /** Escolha de conjurar durante a resolução do gatilho de suspender; usa OK/Cancelar. */
+    suspendCast?: { card: FCard };
+    /** Atacantes e bloqueadores da declaração atual, identificados pela instância da carta. */
+    blocking?: { selectedAttacker: number | null; attackers: number[]; blockers: number[]; legalAssignments: { blocker: number; attackers: number[] }[] };
     targeting?: FTargets & { source: number; card?: FCard } };
   question?: FQuestion;
   room?: FRoom;
@@ -154,6 +164,7 @@ export type ClientMessage =
   | { type: 'sideboard'; id: number; deck: unknown } | { type: 'next-game'; id: number }
   | { type: 'rematch' } | { type: 'leave' }
   | { type: 'card'; id: number; gen?: number }
+  | { type: 'block'; attacker: number; blocker: number; gen: number }
   | { type: 'stack'; id: number; gen?: number }
   | { type: 'player'; id: number; gen?: number }
   | { type: 'mana'; color: string; gen?: number }

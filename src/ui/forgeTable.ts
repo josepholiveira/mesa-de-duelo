@@ -8,6 +8,7 @@ import { inspectCard, showCardPreview, hideCardPreview } from './cardInspector';
 import { PresentationTimeline, presentationDuration, hasLiveDecision, stateWithFrame, type PresentationEvent, type PresentationFrame } from './presentationTimeline';
 import { createGameAudio } from './audio';
 import { attachHandDrag } from './handDrag';
+import { exileShelfCards, canPlayExileCard, validBlockSelection, legalBlockTargets, blockPairAction, selectedForInput, canSelectExileCard, type BlockSelection } from './playContext';
 import { applyOpeningPresentation, suppressOpeningPreview } from './openingPresentation';
 import type { DeckEntry } from '../decks';
 import './gameplay.css';
@@ -120,6 +121,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     <div class="avatar-slot me" id="fMeAvatar"></div>
     <div class="piles me" id="fMePiles"></div>
     <div class="hand" id="fHand"></div>
+    <section class="exile-shelf" id="fExileShelf" aria-label="Cartas disponíveis no exílio" hidden></section>
 
     <aside class="stack-panel" id="fStack" aria-label="Mágicas e habilidades na pilha" hidden></aside>
     <svg class="target-arrows" id="fTargets" aria-hidden="true"></svg>
@@ -156,6 +158,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   /** Seleção em andamento na pergunta aberta. */
   let qState: { id: number; picked: number[]; text: string; amounts: string[] } | null = null;
   let groupIds: number[] | null = null;
+  let selectedBlocker: BlockSelection | null = null;
   let stackGalleryOpen = false;
   let sideboardDraft: { id: number; main: DeckEntry[]; sideboard: DeckEntry[] } | null = null;
   let sideboardError = '';
@@ -177,6 +180,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     el.innerHTML = html; renderedContent.set(el, { html, first: el.firstChild });
   };
   const inspectIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg>';
+  const selectedBadge = (s: FState, c: FCard) => selectedForInput(s, c.id) ? '<span class="choice-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span>' : '';
   const inspectButton = (c: FCard) => !c.faceDown && c.name ? `<button class="inspect-card" data-inspect="${c.id}" aria-label="Inspecionar ${esc(label(c))}">${inspectIcon}</button>` : '';
 
   function syncSettings() {
@@ -334,9 +338,40 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     for (const p of s.players) {
       const mine = p.id === s.you;
       for (const c of p.graveyard) if (canUse(s, c)) out.push({ c, tag: mine ? 'Cemitério' : `Cemitério de ${p.name}` });
-      for (const c of p.exile) if (canUse(s, c)) out.push({ c, tag: c.plotted ? 'Tramada' : mine ? 'Exílio' : `Exílio de ${p.name}` });
     }
     return out;
+  }
+
+  function renderExileShelf(s: FState) {
+    const cards = exileShelfCards(s);
+    const shelf = $('#fExileShelf');
+    const arena = root.querySelector<HTMLElement>('.forge')!;
+    shelf.hidden = !cards.length;
+    arena.classList.toggle('has-exile-shelf', !!cards.length);
+    arena.style.setProperty('--exile-visible', String(Math.min(2, cards.length)));
+    setHTML(shelf, `<span class="exile-shelf-label">Exílio</span><div class="exile-shelf-track" tabindex="0" aria-label="Cartas no exílio. Role para ver todas.">${cards.map(({ card, suspended, permission, choosing }) => {
+      const playable = canPlayExileCard(s, card.id, s.input.gen);
+      const selecting = canSelectExileCard(s, card.id, s.input.gen);
+      const selected = selectedForInput(s, card.id);
+      const time = card.counters?.TIME ?? 0;
+      const status = choosing ? 'Conjurar agora' : suspended ? time > 0 ? `Suspensa · ${time}` : 'Aguardando resolução' : playable ? card.land ? 'Jogar terreno' : 'Conjurar' : 'Aguardando o momento de jogar';
+      const caption = choosing ? 'Conjurar' : suspended ? time > 0 ? 'Suspensa' : 'Na pilha' : playable ? 'Jogar' : 'Aguarde';
+      return `<div class="exile-slot"><div class="exile-card${playable ? ' playable' : ''}${selecting ? ' selectable' : ''}${selected ? ' choice-selected' : ''}${choosing ? ' suspend-ready' : ''}${!playable && !choosing && !selecting ? ' waiting' : ''}" data-fid="${card.id}" data-exile-card role="button" tabindex="0"${selecting ? ` aria-pressed="${selected}"` : ''} aria-label="${esc(label(card))}, exílio. ${status}${permission && suspended ? '. Também pode ser jogada pela permissão de exílio' : ''}">${face(card, 'normal')}
+        ${suspended ? `<span class="exile-time" title="${time} ${time === 1 ? 'marcador de tempo' : 'marcadores de tempo'}">${COUNTER_ICON.TIME}<b>${time}</b></span>` : ''}
+        <span class="exile-status" title="${esc(status)}">${caption}</span>${selectedBadge(s, card)}</div>${inspectButton(card)}</div>`;
+    }).join('')}</div>`);
+  }
+  function layoutExileShelf() {
+    const arena = root.querySelector<HTMLElement>('.forge')!;
+    const hand = $('#fHand');
+    hand.style.removeProperty('--shelf-hand-overlap');
+    if (!arena.classList.contains('has-exile-shelf') || hand.classList.contains('crowded')) return;
+    const slots = [...hand.querySelectorAll<HTMLElement>('.hand-slot')];
+    if (slots.length < 2) return;
+    const width = slots[0].getBoundingClientRect().width;
+    const space = Math.max(width, hand.clientWidth - 24);
+    const step = Math.max(14, Math.min(width * .66, (space - width) / (slots.length - 1)));
+    hand.style.setProperty('--shelf-hand-overlap', `${step - width}px`);
   }
 
   function combatIndex(s: FState, id: number): { attack?: number; block?: number } {
@@ -450,7 +485,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
   window.addEventListener('resize', () => {
     const s = client?.state;
-    if (s?.type === 'state' && !root.hidden) { layoutStack(); const visual = stateWithFrame(s, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); }
+    if (s?.type === 'state' && !root.hidden) { layoutExileShelf(); layoutStack(); const visual = stateWithFrame(s, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); }
   });
 
   const COUNTER_LABEL: Record<string, string> = { P1P1: '+1/+1', M1M1: '-1/-1', LOYALTY: 'Lealdade', SHIELD: 'Escudo', STUN: 'Atordoar' };
@@ -498,6 +533,14 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (c.blocking || ci.block) slot.push('blocking');
     const inner = ['bfc'];
     if (usable(s, c.id)) inner.push('actionable');
+    const selected = selectedForInput(s, c.id);
+    const selectionCandidate = !!s.input.selection && (usable(s, c.id) || selected);
+    if (selected) inner.push('choice-selected');
+    const blockCandidate = !!s.input.blocking?.blockers.includes(c.id);
+    const blockSelected = validBlockSelection(s, selectedBlocker) && selectedBlocker.blocker === c.id;
+    if (blockCandidate) inner.push('block-candidate');
+    if (blockSelected) inner.push('block-selected');
+    if (legalBlockTargets(s, selectedBlocker).includes(c.id)) inner.push('block-target');
     const dmg = c.damage ?? 0;
     if (dmg > (lastDamage.get(c.id) ?? 0)) inner.push('hit');
     // Ataque a um planeswalker: o atacante mostra o alvo e o planeswalker mostra quem o ataca.
@@ -509,6 +552,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     else if (ci.block) tag = `<span class="tag blk">${ICON_SHIELD}${ci.block}</span>`;
     else if (attackers.length) tag = `<span class="tag atk">Atacado ${ICON_SWORD}${attackers.join(',')}</span>`;
     else if (c.creature && c.sick && c.controller === s.activePlayer) tag = '<span class="tag zzz">zZ</span>';
+    if (blockSelected) tag = `<span class="tag block-pending">${ICON_SHIELD}Selecionada</span>`;
     const loyalty = c.planeswalker ? c.counters?.LOYALTY ?? 0 : undefined;
     const pt = c.creature
       ? `<span class="pt"><b class="${delta(c.power ?? 0, c.basePower)}">${c.power}</b>/<b class="${dmg > 0 ? 'down' : delta(c.toughness ?? 0, c.baseToughness)}">${(c.toughness ?? 0) - dmg}</b></span>`
@@ -523,10 +567,10 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const aria = [label(c), c.copyOf ? `cópia feita por ${c.copyOf}` : '', c.token ? 'ficha' : '',
       kws.map(k => KEYWORD_LABEL[k]).join(', '), shown.map(([k, v]) => `${counterLabel(k)} ×${v}`).join(', '), loyalty !== undefined ? `lealdade ${loyalty}` : '', attached.length ? `com ${attached.map(label).join(', ')}` : ''].filter(Boolean).join(', ');
     const atts = attached.map((a, i) =>
-      `<div class="att${usable(s, a.id) ? ' actionable' : ''}" data-fid="${a.id}" role="button" tabindex="0" style="--i:${i + 1}" aria-label="${esc(label(a))}, presa a ${esc(label(c))}">${face(a, 'small')}</div>`).join('');
+      `<div class="att${usable(s, a.id) ? ' actionable' : ''}${selectedForInput(s, a.id) ? ' choice-selected' : ''}" data-fid="${a.id}" role="button" tabindex="0"${s.input.selection ? ` aria-pressed="${selectedForInput(s, a.id)}"` : ''} style="--i:${i + 1}" aria-label="${esc(label(a))}, presa a ${esc(label(c))}">${face(a, 'small')}${selectedBadge(s, a)}</div>`).join('');
     const style = attached.length ? ` style="--atts:${attached.length}"` : '';
     if (attached.length) slot.push('has-att');
-    return `<div class="${slot.join(' ')}"${style}>${atts}<div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(aria)}">${face(c, 'small')}${badges}${tag}${kwHTML}${pt}${counters}</div>${inspectButton(c)}</div>`;
+    return `<div class="${slot.join(' ')}"${style}>${atts}<div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0"${selectionCandidate ? ` aria-pressed="${selected}"` : blockCandidate ? ` aria-pressed="${blockSelected}"` : ''} aria-label="${esc(aria)}">${face(c, 'small')}${badges}${tag}${kwHTML}${pt}${counters}${selectedBadge(s, c)}</div>${inspectButton(c)}</div>`;
   }
 
   /** Cartas de uma fileira, sem as auras/equipamentos (que vão desenhados junto da carta a que estão presos). */
@@ -551,7 +595,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     for (const c of cards) {
       const ctr = Object.entries(c.counters ?? {}).filter(([, v]) => v).sort().join(',');
       const ci = combatIndex(s, c.id);
-      const alone = atts.has(c.id) || c.faceDown || c.attacking || c.blocking || ci.attack || ci.block || s.combat.some(x => x.defender === c.id);
+      const alone = !!s.input.selection || (!!s.input.blocking && c.creature && c.controller === s.you) || atts.has(c.id) || c.faceDown || c.attacking || c.blocking || ci.attack || ci.block || s.combat.some(x => x.defender === c.id);
       const body = c.creature ? `|${c.power}/${c.toughness}|${c.damage ?? 0}|${[...(c.keywords ?? [])].sort()}|${!!c.sick}` : '';
       const k = alone ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}|${c.token}|${c.copyOf ?? ''}|${ctr}${body}`;
       groups.set(k, [...(groups.get(k) ?? []), c]);
@@ -671,7 +715,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   }
   function renderStackGallery(s: FState) {
     if (!stackGalleryOpen) return;
-    const boardDecision = !s.input.selectableStacks?.length && (!!s.input.paying || !!s.input.targeting || !!s.input.selectablePlayers?.length || !!s.input.selectable.length || (!s.input.priority && (s.input.ok.enabled || s.input.cancel.enabled)));
+    const boardDecision = !s.input.selectableStacks?.length && (!!s.input.selection || !!s.input.blocking || !!s.input.suspendCast || !!s.input.paying || !!s.input.targeting || !!s.input.selectablePlayers?.length || !!s.input.selectable.length || (!s.input.priority && (s.input.ok.enabled || s.input.cancel.enabled)));
     if (!s.stack.length || s.question || s.gameOver || s.sideboarding || boardDecision) { closeStackGallery(); return; }
     const gallery = $('#fStackGallery');
     const track = gallery.querySelector<HTMLElement>('.stack-gallery-track');
@@ -739,9 +783,9 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function buttons(s: FState) {
     if (s.gameOver || s.question) return '';
     const handCount = s.players.find(p => p.id === s.you)?.hand.length ?? 0;
-    const ok = s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
+    const ok = s.input.suspendCast ? { ...s.input.ok, label: 'Conjurar agora' } : s.input.blocking ? { ...s.input.ok, label: 'Confirmar bloqueios' } : s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
       : s.input.opening === 'mulligan' ? { ...s.input.ok, label: `Manter ${handCount}` } : s.input.ok;
-    const cancel = s.input.opening === 'play-draw' ? { ...s.input.cancel, label: 'Oponente joga' } : s.input.cancel;
+    const cancel = s.input.suspendCast ? { ...s.input.cancel, label: 'Deixar no exílio' } : s.input.opening === 'play-draw' ? { ...s.input.cancel, label: 'Oponente joga' } : s.input.cancel;
     const waiting = clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS;
     const b = (act: string, btn: { label: string; enabled: boolean }, kind: string) =>
       btn.label ? `<button class="arena-btn ${kind}" data-act="${act}" data-gen="${s.input.gen}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
@@ -836,7 +880,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const s = client?.state;
     if (!s || s.type !== 'state') return;
     const savedFocus = focusSnapshot();
-    const scrollPositions = new Map([...root.querySelectorAll<HTMLElement>('.row, .hand')].map(el => [el.id, el.scrollLeft]));
+    const scrollPositions = new Map([...root.querySelectorAll<HTMLElement>('.row, .hand, .exile-shelf-track')].map(el => [el.id, el.scrollLeft]));
     const silently = silentNext || document.hidden;
     if (ingest) {
       const beforeCurrent = timeline.current;
@@ -846,11 +890,13 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       if (silently || hasLiveDecision(s)) displayFrame = null;
       if (!timeline.current && timeline.queued) { advancePresentation(); return; }
     }
+    if (!validBlockSelection(s, selectedBlocker)) selectedBlocker = null;
     const visual = stateWithFrame(s, displayFrame);
     const meIdx = Math.max(0, visual.players.findIndex(p => p.id === visual.you));
     const me = visual.players[meIdx];
     const opp = visual.players[1 - meIdx];
     if (!me || !opp) return;
+    if (s.input.blocking || s.input.selection) motion.cancelPresentation();
     motion.capture();
 
     setHTML($('#fOppHand'), Array.from({ length: opp.handCount }, (_, i) => {
@@ -866,7 +912,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     setHTML($('#fOppCreatures'), fieldRow(visual, opp.battlefield.filter(c => !isBackRow(c))));
     setHTML($('#fMeCreatures'), fieldRow(visual, me.battlefield.filter(c => !isBackRow(c))));
 
-    // Na ponta da mão, as cartas do cemitério e do exílio que dá para usar agora, cada uma com a etiqueta da zona.
+    // Cartas do cemitério utilizáveis continuam na mão; o exílio tem seu próprio espaço.
     const extra = outsideHand(s);
     const fan = [...me.hand.map(c => ({ c, tag: '' })), ...extra];
     const n = fan.length;
@@ -874,15 +920,17 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     setHTML($('#fHand'), fan.map(({ c, tag }, i) => {
       const off = i - (n - 1) / 2;
       const sel = tag || usable(s, c.id) ? 'playable' : '';
+      const selected = selectedForInput(s, c.id);
       const openingSelected = !!s.input.openingSelected?.includes(c.id);
-      const openingSelection = s.input.opening === 'mulligan-bottom' ? ` aria-pressed="${openingSelected}"` : '';
+      const openingSelection = s.input.opening === 'mulligan-bottom' ? ` aria-pressed="${openingSelected}"` : s.input.selection && (usable(s, c.id) || selected) ? ` aria-pressed="${selected}"` : '';
       // Selo do custo acima do canto esquerdo: no leque, a carta seguinte cobre o canto direito, onde fica o custo impresso.
       const cost = !c.faceDown && c.manaCost ? `<div class="hcost" aria-hidden="true">${manaHTML(c.manaCost)}</div>` : '';
       const where = tag ? `<div class="hzone">${esc(tag)}</div>` : '';
-      return `<div class="hand-slot"><div class="hcard ${sel}${tag ? ' outside' : ''}${openingSelected ? ' opening-selected' : ''}" data-fid="${c.id}" role="button" tabindex="0"${openingSelection} aria-label="${esc(label(c))}${tag ? ` (${esc(tag)})` : ''}"
-        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}${where}</div>${inspectButton(c)}</div>`;
+      return `<div class="hand-slot"><div class="hcard ${sel}${tag ? ' outside' : ''}${openingSelected ? ' opening-selected' : ''}${selected ? ' choice-selected' : ''}" data-fid="${c.id}" role="button" tabindex="0"${openingSelection} aria-label="${esc(label(c))}${tag ? ` (${esc(tag)})` : ''}"
+        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}${where}${selectedBadge(s, c)}</div>${inspectButton(c)}</div>`;
     }).join(''));
 
+    renderExileShelf(s);
     renderActivity();
 
     const group = PHASE_GROUP[visual.phase ?? ''] ?? '';
@@ -896,12 +944,16 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
     // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
     const pc = s.input.card ?? s.input.targeting?.card;
-    const promptCard = pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
+    const promptCard = !s.input.suspendCast && pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
       ? `<div class="prompt-card" data-peek="${pc.id}">${face(pc, 'normal')}</div>` : '';
     const opening = s.input.opening;
-    const prompt = s.input.priority && !s.input.paying && !s.input.targeting ? '' : opening === 'play-draw' || opening === 'mulligan' || (opening === 'mulligan-bottom' && s.input.openingReturnCount !== undefined) ? ''
+    const prompt = s.input.suspendCast ? 'Suspender: conjure agora sem pagar o custo de mana ou deixe a carta no exílio.'
+      : s.input.blocking ? selectedBlocker ? `${label(findCard(selectedBlocker.blocker)!)}: escolha o atacante. Se já estiver bloqueando esse atacante, o clique remove o bloqueio.` : 'Escolha uma criatura sua e depois o atacante que ela vai bloquear.'
+      : s.input.priority && !s.input.paying && !s.input.targeting ? '' : opening === 'play-draw' || opening === 'mulligan' || (opening === 'mulligan-bottom' && s.input.openingReturnCount !== undefined) ? ''
       : opening === 'mulligan-bottom' ? s.input.message.replace(/(\d+)\s+carta\(s\)/g, (_, n: string) => `${n} ${Number(n) === 1 ? 'carta' : 'cartas'}`) : s.input.message;
-    setHTML($('#fAction'), `${promptCard}<div class="prompt">${richText(prompt).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`);
+    $('#fAction').classList.toggle('suspend-choice', !!s.input.suspendCast);
+    const selectionCount = s.input.selection && !s.input.opening ? `<span class="selection-count" role="status">Seleção: ${s.input.selection.cards.length}/${s.input.selection.max}</span>` : '';
+    setHTML($('#fAction'), `${promptCard}<div class="prompt">${richText(prompt).replace(/\n/g, '<br>')}</div>${selectionCount}<div class="btns">${buttons(s)}</div>`);
     announce(prompt || (opening === 'play-draw' ? 'Escolha quem joga primeiro.' : opening === 'mulligan' ? `Mão inicial: ${me.hand.length} cartas.` : opening === 'mulligan-bottom' ? `Cartas a devolver: ${s.input.openingReturnRemaining ?? s.input.openingReturnCount ?? 0}.` : ''));
 
     const qEl = $('#fQuestion');
@@ -953,13 +1005,14 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       const slots = [...stack.querySelectorAll<HTMLElement>(':scope > .slot')];
       slots.slice(0, -1).forEach(slot => slot.querySelectorAll<HTMLElement>('[tabindex],.inspect-card').forEach(el => { el.tabIndex = -1; }));
     });
-    root.querySelectorAll<HTMLElement>('.row, .hand').forEach(el => { el.scrollLeft = scrollPositions.get(el.id) ?? 0; });
+    root.querySelectorAll<HTMLElement>('.row, .hand, .exile-shelf-track').forEach(el => { el.scrollLeft = scrollPositions.get(el.id) ?? 0; });
     applyOpeningPresentation(root, s);
     restoreFocus(savedFocus);
     syncModal();
+    layoutExileShelf();
     layoutStack();
     drawBlockArrows(visual);
-    motion.play({ silent: silently || suppressOpeningPreview(s), semantic: !!s.events });
+    motion.play({ silent: silently || suppressOpeningPreview(s) || !!s.input.blocking || !!s.input.selection, semantic: !!s.events });
     drawTargetArrows(visual);
     lastDamage = new Map(s.players.flatMap(p => p.battlefield.map(c => [c.id, c.damage ?? 0] as [number, number])));
   }
@@ -991,6 +1044,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (onStack) return onStack;
     if (!withPrompt) return undefined;
     if (s.input.card?.id === id) return s.input.card;
+    if (s.input.suspendCast?.card.id === id) return s.input.suspendCast.card;
     for (const o of s.question?.options ?? []) if (typeof o !== 'string' && o.card?.id === id) return o.card;
     return undefined;
   }
@@ -1021,6 +1075,18 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     $('#fToasts').append(el);
     setTimeout(() => el.classList.add('out'), 4100);
     setTimeout(() => el.remove(), 4500);
+  }
+
+  function sendInputAction(act: 'ok' | 'cancel' | 'pass-turn', gen: number) {
+    const s = client?.state;
+    if (!client || !s || disconnected || gen !== s.input.gen || s.question) return;
+    if (act === 'pass-turn' ? !s.input.priority || !s.input.ok.enabled || s.input.paying || s.input.targeting || s.activePlayer !== s.you || !!s.stack.length : !s.input[act].enabled) return;
+    if (gen === clickedGen && Date.now() - clickedAt < CLICK_LOCK_MS) return;
+    clickedGen = gen; clickedAt = Date.now(); selectedBlocker = null;
+    stopPresentation(); hideCardPreview(true);
+    client.send({ type: act, gen });
+    render();
+    setTimeout(() => { if (clickedGen === gen) render(); }, CLICK_LOCK_MS + 50);
   }
 
   // ---------- Eventos ----------
@@ -1118,15 +1184,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (act === 'ok' || act === 'cancel' || act === 'pass-turn') {
       const control = t.closest<HTMLElement>('[data-act]')!;
       if (!renderedInputIsCurrent(control)) return;
-      if (act === 'pass-turn' && (!client.state?.input.priority || !client.state.input.ok.enabled || client.state.question || client.state.input.paying || client.state.input.targeting || client.state.activePlayer !== client.state.you || client.state.stack.length)) return;
-      const gen = Number(control.dataset.gen);
-      if (gen === clickedGen && Date.now() - clickedAt < CLICK_LOCK_MS) return;
-      clickedGen = gen;
-      clickedAt = Date.now();
-      stopPresentation();
-      client.send({ type: act, gen });
-      render();
-      setTimeout(() => { if (clickedGen === gen) render(); }, CLICK_LOCK_MS + 50);
+      sendInputAction(act, Number(control.dataset.gen));
       return;
     }
     if (t.closest('.emblem')) return; // fica dentro do retrato, mas não é um clique no jogador
@@ -1136,6 +1194,24 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (pl) { if (renderedInputIsCurrent(pl) && client.state?.input.selectablePlayers?.includes(+pl.dataset.pid!)) { stopPresentation(); client.send({ type: 'player', id: +pl.dataset.pid!, gen: Number(pl.dataset.gen) }); } return; }
     const cd = t.closest<HTMLElement>('[data-fid]');
     if (!cd || !renderedInputIsCurrent(cd)) return;
+    const s = client.state!;
+    const id = Number(cd.dataset.fid), gen = Number(cd.dataset.gen);
+    if (s.input.blocking && cd.closest('.field')) {
+      if (s.input.blocking.blockers.includes(id)) {
+        selectedBlocker = selectedBlocker?.blocker === id ? null : { blocker: id, gen };
+        hideCardPreview(true); renderTable(false); return;
+      }
+      if (s.input.blocking.attackers.includes(id)) {
+        const action = blockPairAction(s, selectedBlocker, id, gen);
+        if (!action) { announce(selectedBlocker ? 'Essa criatura não pode bloquear esse atacante.' : 'Selecione primeiro uma criatura sua para bloquear.'); return; }
+        selectedBlocker = null; stopPresentation(); hideCardPreview(true); client.send(action); renderTable(false); return;
+      }
+      return;
+    }
+    if (cd.hasAttribute('data-exile-card')) {
+      if (s.input.suspendCast?.card.id === id) { sendInputAction('ok', gen); return; }
+      if (!canPlayExileCard(s, id, gen) && !canSelectExileCard(s, id, gen)) { showPreview(findCard(id), cd, true); return; }
+    }
     // Usar uma carta do cemitério ou do exílio fecha a janela, para a pergunta seguinte aparecer.
     if (cd.closest('#fZone')) closeZone();
     stopPresentation();
@@ -1198,6 +1274,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   });
   root.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      if (selectedBlocker) { selectedBlocker = null; e.preventDefault(); renderTable(false); return; }
       if (stackGalleryOpen) { e.preventDefault(); closeStackGallery(); return; }
       if (zoneOf !== null || groupIds) { closeZone(); return; }
       $('#fMenu').hidden = true; $('#fSettings').hidden = true; $('#fLogDrawer').hidden = true; root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', 'false'); hideCardPreview(true);
@@ -1227,7 +1304,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   return {
     attach(c, pics) {
       client = c; portraits = pics; lastTurn = 0; disconnected = false; qState = null; clickedGen = -1; zoneOf = null;
-      lastDamage = new Map(); groupIds = null;
+      lastDamage = new Map(); groupIds = null; selectedBlocker = null;
       stackGalleryOpen = false; $('#fStackGallery').hidden = true;
       handDrag.cancel(); stopPresentation(); timeline.reset(); silentNext = true; hideCardPreview(true);
       sideboardDraft = null; sideboardBusy = false; sideboardError = '';

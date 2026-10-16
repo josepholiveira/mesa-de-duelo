@@ -269,7 +269,7 @@ final class Session {
 
     void onClientMessage(Seat seat, String type, JsonObject msg) {
         int actionGen = -1;
-        if (Set.of("card", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
+        if (Set.of("card", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
             if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { markDirty(); return; }
             actionGen = exactInt(msg.get("gen"));
             if (actionGen != seat.inputGen.get() || seat.question != null || !"playing".equals(matchPhase)) { markDirty(); return; }
@@ -300,6 +300,15 @@ final class Session {
                 markDirty();
             }
             case "concede" -> concede(seat);
+            case "block" -> {
+                int attacker = exactInt(msg.get("attacker")), blocker = exactInt(msg.get("blocker"));
+                seat.onEdt(genAtClick, c -> {
+                    if (!(c instanceof PlayerControllerHuman human)
+                        || !InputContext.assignBlock(human.getInputQueue().getInput(), attacker, blocker))
+                        seat.send(toast("error", "Esse bloqueio não é válido. Escolha um atacante permitido."));
+                    markDirty();
+                });
+            }
             case "card" -> {
                 CardView cv = findCard(seat, msg.get("id").getAsInt());
                 if (cv != null) seat.onEdt(genAtClick, c -> c.selectCard(cv, null, null));
@@ -401,7 +410,9 @@ final class Session {
                 q.addProperty("max", 1);
                 if (a[0] != null) q.add("card", StateJson.card((CardView) a[0]));
                 options.addAll((Collection<?>) a[1]);
-                q.add("options", optionsJson(options, null));
+                JsonArray rows = optionsJson(options, null);
+                if (seat.controller() instanceof PlayerControllerHuman human) AbilityOptions.addCosts(human, options, rows);
+                q.add("options", rows);
             }
             case chooseSingleEntityForEffect -> {
                 q.addProperty("kind", "choose");
@@ -728,6 +739,12 @@ final class Session {
                 Object currentInput = seat.controller() instanceof PlayerControllerHuman human ? human.getInputQueue().getInput() : null;
                 boolean priority = currentInput instanceof InputPassPriority;
                 input.addProperty("priority", priority);
+                JsonObject blocking = InputContext.blocking(currentInput);
+                if (blocking != null) input.add("blocking", blocking);
+                JsonObject suspendCast = InputContext.suspendCast(currentInput);
+                if (suspendCast != null) input.add("suspendCast", suspendCast);
+                JsonObject selection = InputContext.selection(currentInput);
+                if (selection != null) input.add("selection", selection);
                 if (currentInput instanceof InputLondonMulligan) input.addProperty("opening", "mulligan-bottom");
                 else if (currentInput instanceof InputConfirmMulligan) input.addProperty("opening", "mulligan");
                 else if (currentInput instanceof InputConfirm && m.getGame().getAge() == GameStage.BeforeMulligan && !events.gameStarted())

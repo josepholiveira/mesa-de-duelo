@@ -12,7 +12,7 @@ async function sourceModule(path) {
 const { PresentationTimeline, hasLiveDecision, stateWithFrame, presentationDuration } = await sourceModule('../src/ui/presentationTimeline.ts');
 const { canDragHandCard, handDropAction } = await sourceModule('../src/ui/handDrag.ts');
 const { createMotion } = await sourceModule('../src/ui/motion.ts');
-const { AudioEventGate, normalizeAudioSettings, soundForEvent, soundVariation, SOUND_FILES, createGameAudio } = await sourceModule('../src/ui/audio.ts');
+const { AudioEventGate, AudioEventMix, normalizeAudioSettings, soundForEvent, soundVariation, SOUND_FILES, MIX_HEADROOM, createGameAudio } = await sourceModule('../src/ui/audio.ts');
 const event = (seq, type = 'spell-cast', extra = {}) => ({ seq, type, ...extra });
 function state() {
   return { type: 'state', you: 1, turn: 3, phase: 'MAIN1', activePlayer: 2, gameOver: false,
@@ -195,6 +195,26 @@ test('per-action variation is gentle, deterministic and preserves cue identity',
   assert.ok(rates.size > 90);
 });
 
+test('specific outcomes replace generic resolution sounds without silencing unrelated effects', () => {
+  const mix = new AudioEventMix();
+  assert.equal(mix.level(event(1, 'spell-cast', { sourceId: 7 }), 'a'), 1);
+  assert.equal(mix.level(event(2, 'damage', { sourceId: 7 }), 'a'), 1);
+  assert.equal(mix.level(event(3, 'resolved', { sourceId: 7 }), 'a'), 0);
+  assert.equal(mix.level(event(4, 'resolved', { sourceId: 8 }), 'a'), .55);
+  mix.level(event(5, 'ability-activated', { sourceId: 7 }), 'a');
+  assert.equal(mix.level(event(6, 'resolved', { sourceId: 7 }), 'a'), .55, 'a later activation is a separate effect');
+  mix.level(event(7, 'entered', { card: { id: 9 } }), 'a');
+  assert.equal(mix.level(event(8, 'resolved', { sourceId: 9 }), 'a'), 0);
+  mix.level(event(9, 'draw', { actor: 1 }), 'a');
+  assert.equal(mix.level(event(10, 'resolved', { actor: 2 }), 'a'), .55);
+  assert.equal(mix.level(event(11, 'resolved', { actor: 1 }), 'a'), 0);
+  mix.level(event(12, 'draw', { actor: 1 }), 'a');
+  mix.level(event(13, 'spell-cast', { sourceId: 10, actor: 1 }), 'a');
+  assert.equal(mix.level(event(14, 'resolved', { sourceId: 10, actor: 1 }), 'a'), .55, 'a prior draw belongs to another action');
+  assert.equal(mix.level(event(1, 'resolved', { sourceId: 9, actor: 1 }), 'b'), .55, 'another match has no previous outcome');
+  assert.equal(soundForEvent(event(1, 'entered', { card: { land: true } })), 'land');
+});
+
 test('sound gate consumes muted, hidden, locked and catch-up events without replay', () => {
   const base = { muted: false, volume: .3, unlocked: true, visible: true, audible: true };
   for (const patch of [{ muted: true }, { volume: 0 }, { unlocked: false }, { visible: false }, { audible: false }]) {
@@ -257,10 +277,37 @@ test('all shipped sound assets are short stereo PCM without clipping', async () 
     assert.equal(wav.toString('ascii', 0, 4), 'RIFF'); assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
     assert.equal(wav.readUInt16LE(22), 2); assert.equal(wav.readUInt32LE(24), 44100); assert.equal(wav.readUInt16LE(34), 16);
     assert.ok((wav.length - 44) / (44100 * 4) <= 1.1);
-    for (let i = 44; i < wav.length; i += 2) assert.ok(Math.abs(wav.readInt16LE(i)) < 32767);
+    let maximum = 0;
+    for (let i = 44; i < wav.length; i += 2) maximum = Math.max(maximum, Math.abs(wav.readInt16LE(i)));
+    const stereoCrossfeed = 1 + Math.sin(.12 * Math.PI / 2);
+    assert.ok(maximum / 32767 * 1.04 * 4 * MIX_HEADROOM * stereoCrossfeed < 1, 'four panned maximum-volume voices retain mixing headroom');
     hashes.add(createHash('sha256').update(wav).digest('hex'));
   }
   assert.equal(hashes.size, Object.values(SOUND_FILES).length, 'semantic cues must not reuse the same waveform');
+});
+
+
+test('damage source is licensed and pinned; adapted blasts start promptly and remain distinct', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../public/audio/sources/manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.sources).sort(), ['creature', 'player']);
+  for (const metadata of Object.values(manifest.sources)) {
+    assert.equal(metadata.license, 'CC0-1.0');
+    const source = await readFile(new URL(`../public/audio/sources/${metadata.file}`, import.meta.url));
+    assert.equal(createHash('sha256').update(source).digest('hex'), metadata.sha256);
+    assert.equal(source.length, metadata.bytes);
+  }
+  const durations = [];
+  for (const name of [SOUND_FILES.impact, SOUND_FILES['player-hit']]) {
+    const wav = await readFile(new URL(`../public/audio/${name}`, import.meta.url));
+    durations.push((wav.length - 44) / (44100 * 4));
+    let energy = 0;
+    const samples = Math.round(.05 * 44100) * 2;
+    for (let i = 0; i < samples; i++) energy += (wav.readInt16LE(44 + i * 2) / 32767) ** 2;
+    assert.ok(Math.sqrt(energy / samples) > .015, 'damage must begin audibly without source pre-roll');
+    assert.equal(wav.readInt16LE(wav.length - 2), 0, 'tail fades fully to silence');
+  }
+  assert.ok(durations[0] < .55, 'creature burst remains brief');
+  assert.ok(durations[1] > durations[0] * 1.5 && durations[1] <= 1.1, 'player blast has a distinct, bounded tail');
 });
 
 function motionFixture(reduce = false) {

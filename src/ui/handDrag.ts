@@ -4,11 +4,12 @@ export interface HandDragIntent { id: number; gen: number; x: number; y: number 
 export interface DropBounds { left: number; right: number; top: number; bottom: number }
 export const DRAG_THRESHOLD = 9;
 
-/** A drag begins only a currently legal hand play; targets and payment stay with Forge. */
+/** A drag begins only a currently legal hand or permitted exile play; Forge owns payment and targets. */
 export function canDragHandCard(state: FState | null | undefined, id: number, gen: number) {
   return !!state && !!state.input.priority && state.input.ok.enabled && state.input.gen === gen && !state.gameOver && !state.question && !state.sideboarding &&
-    !state.input.paying && !state.input.targeting &&
-    !!state.players.find(p => p.id === state.you)?.hand.some(card => card.id === id) &&
+    !state.input.paying && !state.input.targeting && !state.input.suspendCast &&
+    (!!state.players.find(p => p.id === state.you)?.hand.some(card => card.id === id) ||
+      (!!state.playableExile?.includes(id) && state.players.some(p => p.exile.some(card => card.id === id && !card.faceDown)))) &&
     (!!state.input.actionable?.includes(id) || !!state.castable?.includes(id));
 }
 export function handDropAction(state: FState | null | undefined, intent: HandDragIntent, x: number, y: number, bounds: DropBounds | null) {
@@ -33,7 +34,7 @@ export function attachHandDrag(root: HTMLElement, options: {
     drag = null;
   }
   root.addEventListener('pointerdown', e => {
-    const source = (e.target as HTMLElement).closest<HTMLElement>('#fHand .hcard[data-fid]');
+    const source = (e.target as HTMLElement).closest<HTMLElement>('#fHand .hcard[data-fid], #fExileShelf .exile-card[data-fid]');
     if (!source || e.button !== 0 || !e.isPrimary || !canDragHandCard(options.state(), Number(source.dataset.fid), Number(source.dataset.gen))) return;
     drag = { id: Number(source.dataset.fid), gen: Number(source.dataset.gen), x: e.clientX, y: e.clientY, pointer: e.pointerId, source, ghost: null };
   });
@@ -66,7 +67,7 @@ export function attachHandDrag(root: HTMLElement, options: {
   });
   root.addEventListener('pointercancel', cancel);
   root.addEventListener('lostpointercapture', cancel);
-  root.addEventListener('dragstart', e => { if ((e.target as HTMLElement).closest('#fHand')) e.preventDefault(); });
+  root.addEventListener('dragstart', e => { if ((e.target as HTMLElement).closest('#fHand, #fExileShelf')) e.preventDefault(); });
   root.addEventListener('keydown', e => { if (e.key === 'Escape' && drag) { e.preventDefault(); cancel(); } });
   root.addEventListener('click', e => { if (performance.now() < suppressUntil) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });

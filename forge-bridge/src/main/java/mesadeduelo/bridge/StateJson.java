@@ -19,6 +19,7 @@ import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
 import forge.game.card.CounterType;
 import forge.game.combat.CombatView;
+import forge.game.keyword.Keyword;
 import forge.game.keyword.KeywordView;
 import forge.game.player.Player;
 import forge.game.player.PlayerView;
@@ -50,6 +51,8 @@ final class StateJson {
         for (PlayerView p : gv.getPlayers()) players.add(player(p, viewer == -1 || viewer == p.getId(), game));
         o.add("players", players);
         o.add("castable", castable(game, viewer));
+        o.add("playableExile", playableExile(game, viewer));
+        o.add("suspendedExile", suspendedExile(game, viewer));
 
         JsonArray stack = new JsonArray();
         if (gv.getStack() != null) {
@@ -68,7 +71,18 @@ final class StateJson {
 
         JsonArray combat = new JsonArray();
         CombatView cv = gv.getCombat();
-        if (cv != null) {
+        if (game != null && game.getCombat() != null) {
+            // CombatView commits blockers later; declarations must show the actual current pairs.
+            var live = game.getCombat();
+            for (Card attacker : live.getAttackers()) {
+                JsonObject c = new JsonObject(); c.addProperty("attacker", attacker.getId());
+                var defender = live.getDefenderByAttacker(attacker);
+                if (defender != null) c.addProperty("defender", defender.getId());
+                JsonArray blockers = new JsonArray();
+                for (Card blocker : live.getBlockers(attacker)) blockers.add(blocker.getId());
+                c.add("blockers", blockers); combat.add(c);
+            }
+        } else if (cv != null) {
             for (CardView att : cv.getAttackers()) {
                 JsonObject c = new JsonObject();
                 c.addProperty("attacker", att.getId());
@@ -256,6 +270,36 @@ final class StateJson {
     private static boolean castableNow(Card c, Player who) {
         for (SpellAbility sa : c.getAllPossibleAbilities(who, true)) if (!sa.isManaAbility()) return true;
         return false;
+    }
+
+    /** Zone permission outlives priority, timing and available mana; it never grants an extra action. */
+    static JsonArray playableExile(Game game, int viewer) {
+        JsonArray ids = new JsonArray();
+        Player player = game == null || viewer < 0 ? null : game.getPlayer(viewer);
+        if (player == null) return ids;
+        for (Card card : game.getCardsIn(ZoneType.Exile)) {
+            if (card.mayPlay(player).stream().anyMatch(option -> option.grantsZonePermissions())
+                || (card.getOwner().equals(player) && card.isPlotted())) ids.add(card.getId());
+        }
+        return ids;
+    }
+
+    /** A zero-counter suspended card stays visible only while its real Suspend trigger is pending. */
+    static JsonArray suspendedExile(Game game, int viewer) {
+        JsonArray ids = new JsonArray();
+        Player player = game == null || viewer < 0 ? null : game.getPlayer(viewer);
+        if (player == null) return ids;
+        java.util.Set<Integer> pending = new java.util.HashSet<>();
+        for (var item : game.getStack()) {
+            SpellAbility ability = item.getSpellAbility();
+            if (ability.getTrigger() != null && ability.getTrigger().isKeyword(Keyword.SUSPEND))
+                pending.add(ability.getHostCard().getId());
+        }
+        for (Card card : game.getCardsIn(ZoneType.Exile)) {
+            if (card.getOwner().equals(player) && !card.isFaceDown()
+                && (card.hasSuspend() || pending.contains(card.getId()))) ids.add(card.getId());
+        }
+        return ids;
     }
 
     private static Map<CounterType, Integer> toMap(CardView c) {
