@@ -6,8 +6,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 import org.jupnp.UpnpServiceConfiguration;
@@ -30,13 +29,7 @@ import forge.util.ImageFetcher;
  */
 final class HeadlessGui implements IGuiBase {
     private final String assetsDir;
-    private Thread edtThread;
-    private final ExecutorService edt = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "BridgeEDT");
-        t.setDaemon(true);
-        edtThread = t;
-        return t;
-    });
+    private final UiDispatcher edt = new UiDispatcher();
 
     HeadlessGui(Path forgeGuiDir) {
         this.assetsDir = forgeGuiDir.toAbsolutePath() + File.separator;
@@ -51,7 +44,7 @@ final class HeadlessGui implements IGuiBase {
     @Override public void invokeInEdtAndWait(Runnable r) {
         if (isGuiThread()) { r.run(); return; }
         try {
-            edt.submit(r).get();
+            edt.invokeAndWait(r);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (ExecutionException e) {
@@ -59,7 +52,11 @@ final class HeadlessGui implements IGuiBase {
         }
     }
     @Override public void runBackgroundTask(String message, Runnable task) { new Thread(task, "BridgeTask").start(); }
-    @Override public boolean isGuiThread() { return Thread.currentThread() == edtThread; }
+    @Override public boolean isGuiThread() { return edt.isUiThread(); }
+
+    <T> T awaitBrowserAnswer(CompletableFuture<T> answer) throws InterruptedException, ExecutionException {
+        return edt.await(answer);
+    }
 
     @Override public String getAssetsDir() { return assetsDir; }
     @Override public ImageFetcher getImageFetcher() { return null; }

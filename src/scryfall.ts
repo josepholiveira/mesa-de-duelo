@@ -4,11 +4,18 @@ type Images = { small?: string; normal?: string; art_crop?: string };
  * Versão do formato guardado no cache. Cartas de duas faces salvas antes da v2 ficaram sem imagem
  * (o Scryfall põe as imagens dentro de cada face) e são buscadas de novo.
  */
-const FORMAT = 2;
+const FORMAT = 3;
+const LEGALITY_TTL = 24 * 60 * 60 * 1000;
+const memory = new Map<string, ScryCard>();
 
 /** Subconjunto dos campos do Scryfall que o jogo usa. */
 export interface ScryCard {
   name: string;
+  oracle_id?: string;
+  cmc?: number;
+  rarity?: string;
+  legalities?: Record<string, 'legal' | 'not_legal' | 'restricted' | 'banned'>;
+  fetchedAt?: number;
   layout: string;
   mana_cost?: string;
   type_line: string;
@@ -105,10 +112,15 @@ function slim(c: any): ScryCard {
   return {
     v: FORMAT,
     name: c.name,
+    oracle_id: c.oracle_id,
+    cmc: c.cmc,
+    rarity: c.rarity,
+    legalities: c.legalities,
+    fetchedAt: Date.now(),
     layout: c.layout,
-    mana_cost: c.mana_cost,
+    mana_cost: c.mana_cost ?? faces[0]?.mana_cost,
     type_line: c.type_line,
-    oracle_text: c.oracle_text,
+    oracle_text: c.oracle_text ?? (faces.length ? faces.map(f => `${f.name}\n${f.oracle_text ?? ''}`).join('\n—\n') : undefined),
     power: c.power,
     toughness: c.toughness,
     colors: c.colors,
@@ -122,11 +134,19 @@ function slim(c: any): ScryCard {
   };
 }
 
+export function legalityFresh(card: ScryCard): boolean {
+  return !!card.legalities && !!card.fetchedAt && Date.now() - card.fetchedAt < LEGALITY_TTL;
+}
+
 export function cacheGet(name: string): ScryCard | null {
+  const cached = memory.get(name.toLowerCase());
+  if (cached) return withBasicArt(cached);
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + name.toLowerCase());
     const c: ScryCard | null = raw ? JSON.parse(raw) : null;
-    return !c || (c.faces && c.v !== FORMAT) ? null : withBasicArt(c);
+    if (!c || c.v !== FORMAT || typeof c.name !== 'string' || typeof c.type_line !== 'string' || typeof c.layout !== 'string') return null;
+    memory.set(name.toLowerCase(), c);
+    return withBasicArt(c);
   } catch { return null; }
 }
 
@@ -141,6 +161,8 @@ function faceView(card: ScryCard, i: number): ScryCard {
 
 /** Guarda a carta pelo nome completo e também pelo nome de cada face ("The Enigma Jewel", "Locus of Enlightenment"). */
 function cachePut(card: ScryCard) {
+  memory.set(card.name.toLowerCase(), card);
+  card.faceNames?.forEach((fn, i) => { if (fn) memory.set(fn.toLowerCase(), faceView(card, i)); });
   try {
     localStorage.setItem(CACHE_PREFIX + card.name.toLowerCase(), JSON.stringify(card));
     card.faceNames?.forEach((fn, i) => {
@@ -173,12 +195,12 @@ async function addPortuguese(cards: ScryCard[]) {
 }
 
 /** Busca cartas pelo nome exato. A chave do mapa é o nome em minúsculas. */
-export async function fetchByNames(names: string[]): Promise<Map<string, ScryCard>> {
+export async function fetchByNames(names: string[], refreshLegality = false): Promise<Map<string, ScryCard>> {
   const out = new Map<string, ScryCard>();
   const missing: string[] = [];
   for (const n of new Set(names)) {
     const c = cacheGet(n);
-    if (c) out.set(n.toLowerCase(), c); else missing.push(n);
+    if (c && (!refreshLegality || legalityFresh(c))) out.set(n.toLowerCase(), c); else missing.push(n);
   }
   for (let i = 0; i < missing.length; i += 75) {
     const chunk = missing.slice(i, i + 75);
@@ -193,7 +215,8 @@ export async function fetchByNames(names: string[]): Promise<Map<string, ScryCar
   return out;
 }
 
-export async function searchCards(q: string, page = 1): Promise<{ cards: ScryCard[]; hasMore: boolean; total: number }> {
+export async function searchCards(q: string, page = 1, format?: 'free' | 'pauper'): Promise<{ cards: ScryCard[]; hasMore: boolean; total: number }> {
+  if (format === 'pauper') q = `(${q}) f:pauper`;
   // Multilíngue para aceitar também o nome em português ("Golpe Relampejante").
   const { status, json } = await request(`/cards/search?q=${encodeURIComponent(q)}&unique=cards&order=name&include_multilingual=true&page=${page}`);
   if (status === 404) return { cards: [], hasMore: false, total: 0 };

@@ -1,0 +1,193 @@
+/* The table stays spatial: cards occupy the mat; the stack only opens for pending effects. */
+.forge { grid-template-columns: minmax(0, 1fr); --ch: clamp(88px, 14.5vh, 160px); --cw: calc(var(--ch) * .716); --lch: clamp(62px, 9.5vh, 105px); --lcw: calc(var(--lch) * .716); }
+.forge .mat { background: repeating-linear-gradient(60deg, #ffffff04 0 2px, transparent 2px 26px), repeating-linear-gradient(-60deg, #ffffff04 0 2px, transparent 2px 26px), radial-gradient(ellipse at 50% 50%, var(--mat-center), var(--mat-mid) 45%, var(--bg-deep) 92%); }
+.forge .field { min-width: 0; padding: 0 58px; gap: 0; overflow-x: hidden; overflow-y: auto; justify-content: safe center; }
+.forge.has-stack .field { padding-right: min(275px, 25vw); }
+.forge .row { min-width: 0; width: 100%; flex-shrink: 0; justify-content: safe center; overflow-x: auto; overflow-y: hidden; min-height: calc(var(--ch) + 24px); padding: 12px 12px; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; scroll-padding: 20px; }
+.forge .row.lands { min-height: calc(var(--lch) + 16px); padding: 8px 12px; }
+.forge .row > *, .forge .perm-group, .forge .slot { flex-shrink: 0; }
+.forge .slot { transition: none; }
+.forge .row:focus-visible { outline-offset: -3px; }
+.forge .stack-n { pointer-events: auto; cursor: pointer; min-width: 30px; min-height: 28px; top: -16px; }
+.forge .pt { font-size: max(14px, calc(var(--cw) * .15)); }
+.forge .ctr.kw { min-width: 21px; min-height: 21px; justify-content: center; }
+.forge .ctr.kw svg { width: 15px; height: 15px; }
+.forge .slot.has-flying::before { content: ''; position: absolute; left: 5%; right: 5%; bottom: -9px; height: 25px; border-radius: 50%; background: radial-gradient(ellipse, color-mix(in srgb, var(--glow) 30%, transparent), transparent 70%); pointer-events: none; opacity: .65; animation: flying-mist 3.8s ease-in-out infinite alternate; }
+.forge .slot.has-flying > .bfc .face { box-shadow: 0 8px 12px #0007, 0 0 0 1px color-mix(in srgb, var(--glow) 35%, transparent); }
+.forge .slot.has-flying > .bfc.actionable .face { box-shadow: 0 8px 12px #0007, 0 0 0 2px var(--glow); }
+@keyframes flying-mist { from { transform: translateX(-4px) scale(.93); opacity: .3; } to { transform: translateX(4px) scale(1.08); opacity: .65; } }
+.inspect-card { display: grid; place-items: center; position: absolute; z-index: 7; left: -7px; top: -9px; width: 28px; height: 28px; padding: 5px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: zoom-in; }
+.inspect-card svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.forge .hand { left: 190px; right: 300px; transform: none; max-width: none; justify-content: safe center; height: clamp(144px, 23vh, 215px); overflow-x: auto; overflow-y: hidden; padding: 22px 12px 7px; align-items: flex-end; scrollbar-width: thin; }
+.hand-slot { position: relative; width: clamp(74px, 13.5vh, 126px); height: calc(clamp(74px, 13.5vh, 126px) / .716); flex: 0 0 auto; margin-left: -12px; }
+.hand-slot:first-child { margin-left: 0; }
+.forge .hand-slot .hcard { width: 100%; height: 100%; --fw: clamp(74px, 13.5vh, 126px); transform: none; margin: 0; }
+.forge .hand-slot .hcard:hover, .forge .hand-slot .hcard:focus-visible { transform: none; }
+.forge .hand-slot:focus-within { z-index: 60; }
+.hand-slot .inspect-card { left: 0; top: -16px; }
+/* Preserve the familiar fan for ordinary hands; long hands get a scrollable row. */
+.forge .hand:not(.crowded) { overflow: visible; padding: 0 12px; }
+.forge .hand:not(.crowded) .hand-slot { width: var(--hcw); height: var(--hch); margin-left: calc(var(--hcw) * -.34); }
+.forge .hand:not(.crowded) .hand-slot:first-child { margin-left: 0; }
+.forge .hand:not(.crowded) .hcard { --fw: var(--hcw); transform: translateY(calc(34% + var(--dy))) rotate(var(--rot)); }
+.forge .hand:not(.crowded) .hand-slot:hover, .forge .hand:not(.crowded) .hand-slot:focus-within { z-index: 60; }
+.forge .hand:not(.crowded) .hcard:hover, .forge .hand:not(.crowded) .hcard:focus-visible { transform: translateY(5%) scale(1.04); }
+.forge .hand:not(.crowded) .inspect-card { top: 35%; }
+.forge .hcard.playable { touch-action: none; cursor: grab; }
+.forge .hcard.drag-source { opacity: .35; }
+.hand-drag-ghost { position: fixed; z-index: 80; aspect-ratio: 488 / 680; pointer-events: none; transform: translate(-50%, -70%); filter: drop-shadow(0 12px 15px #0008); }
+.hand-drag-ghost .face { height: 100%; outline: 2px solid var(--gold); }
+.forge.dragging-hand { user-select: none; cursor: grabbing; }
+.forge.dragging-hand .field { outline: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); outline-offset: -8px; }
+
+.hand-slot .hcost { left: auto; right: 2px; font-size: 11px; }
+.forge .hand-slot .hzone { bottom: 3%; font-size: 11px; }
+.forge .avatar-slot.opp { left: 50%; }
+.forge .opp-hand { left: calc(50% + 50px); }
+.forge .piles.opp { top: 116px; right: 18px; }
+.forge .phase-rail { top: 12px; right: 16px; transform: none; padding: 9px 11px; font-size: 13px; }
+.forge .phase-rail .ph:not(.on) { display: none; }
+.forge .turn-owner { max-width: 200px; font-size: 12px; }
+.forge .stack-panel { --stack-width: clamp(164px, 18vw, 240px); position: absolute; right: 18px; top: 48%; bottom: auto; width: var(--stack-width); max-height: none; transform: translateY(-50%); padding: 0; z-index: 9; background: none; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.stack-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 9px; }
+.forge .stack-panel .stack-heading { justify-content: flex-start; margin: 0 0 60px; padding: 0 2px; }
+.forge .stack-panel h2 { margin: 0; color: var(--ink); font: 600 16px var(--body); text-shadow: 0 2px 5px #000; }
+.stack-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 50%; background: var(--gold); color: #281a05; font: 700 14px var(--body); font-variant-numeric: tabular-nums; }
+.stack-pile { display: block; position: relative; width: 100%; aspect-ratio: 488 / 680; padding: 0; background: none; border: 0; border-radius: 12px; cursor: pointer; --fw: var(--stack-width); }
+.stack-layer { position: absolute; inset: 0; z-index: calc(5 - var(--depth)); transform: translate(calc(var(--depth) * -9px), calc(var(--depth) * -17px)) rotate(calc(var(--depth) * -2deg)); pointer-events: none; }
+.stack-layer > .face { box-shadow: 0 8px 18px #0009; outline: 1px solid #ffffff25; outline-offset: -1px; }
+.stack-layer.actionable > .face { outline: 2px solid var(--glow); outline-offset: 3px; }
+.stack-top-label { position: absolute; z-index: 7; left: 50%; bottom: -9px; transform: translateX(-50%); width: max-content; padding: 5px 12px; border: 1px solid var(--gold); border-radius: 999px; background: var(--bg-deep); color: var(--gold); font: 600 12px var(--body); pointer-events: none; }
+.stack-open-hint { display: block; margin-top: 20px; text-align: center; color: var(--muted); font: 400 12px var(--body); }
+.stack-pile:focus-visible { outline: 2px solid var(--gold); outline-offset: 8px; }
+/* Only when live controls need the space below the pile. */
+.forge.stack-tight .stack-panel .stack-heading { position: absolute; right: calc(100% + 36px); top: 12px; margin: 0; padding: 0; flex-direction: column; gap: 8px; }
+.forge.stack-tight .stack-open-hint { display: none; }
+.forge.stack-tight .piles.opp, .forge.stack-tight .phase-rail { right: calc(var(--stack-active-width) + 110px); }
+
+.stack-effect-face { display: flex; flex-direction: column; justify-content: center; gap: 20px; height: 100%; padding: 20px; border-radius: 12px; background: linear-gradient(145deg, #1e3458, #0a1222); border: 2px solid #6e7e9d; box-shadow: 0 8px 18px #0009; text-align: left; overflow-y: auto; }
+.stack-effect-face > span { font: 600 16px var(--body); color: var(--gold); }
+.stack-effect-face p { font: 400 16px/1.5 var(--body); color: var(--ink); margin: 0; }
+.forge .avatar.selectable-player .portrait { outline: 3px solid var(--glow); outline-offset: 4px; }
+.stack-targets { font-size: 12px; line-height: 1.45; color: var(--muted); margin-top: 8px; }
+.forge .stack-gallery-overlay { z-index: 42; background: var(--bg-deep); animation: none; }
+.stack-gallery { --gallery-card-width: clamp(210px, min(23vw, (100dvh - 365px) * .716), 300px); display: flex; flex-direction: column; width: 100%; max-width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--ink); background: radial-gradient(ellipse at 50% 45%, #172840, var(--bg-deep) 72%); }
+.stack-gallery-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 24px 32px 4px; flex-shrink: 0; }
+.stack-gallery-heading h2 { display: flex; align-items: center; gap: 12px; margin: 0; font: 500 28px/1.2 var(--body); letter-spacing: -.02em; }
+.stack-gallery-heading h2 span { padding: 3px 9px; border-radius: 999px; color: var(--gold); background: #ffffff08; font-size: 17px; font-variant-numeric: tabular-nums; }
+.stack-gallery-heading p { margin: 7px 0 0; color: var(--muted); font-size: 14px; }
+.stack-gallery-heading .icon-btn { min-width: 76px; }
+.stack-gallery-track { display: flex; flex: 1; gap: 28px; align-items: safe center; justify-content: safe center; width: 100%; max-width: 100%; min-width: 0; min-height: 0; list-style: none; margin: 0; padding: 30px 44px 20px; overflow: auto; overscroll-behavior: contain; scroll-padding: 44px; scrollbar-width: thin; scrollbar-color: var(--gold) transparent; }
+.stack-gallery-item { flex: 0 0 var(--gallery-card-width); width: var(--gallery-card-width); min-width: 0; position: relative; }
+.stack-gallery-item:focus-within { z-index: 2; }
+.stack-gallery-order { display: flex; align-items: center; gap: 9px; min-height: 24px; margin-bottom: 13px; color: var(--muted); font: 500 13px var(--body); }
+.stack-gallery-order b { color: var(--gold); font: 600 16px var(--body); font-variant-numeric: tabular-nums; }
+.stack-gallery-card { display: block; position: relative; padding: 0; width: 100%; aspect-ratio: 488 / 680; --fw: var(--gallery-card-width); border: 0; border-radius: 12px; background: none; color: inherit; cursor: zoom-in; transform-origin: 50% 60%; transition: transform 150ms cubic-bezier(.2, 0, 0, 1); }
+.stack-gallery-card > .face { outline: 1px solid #ffffff25; outline-offset: -1px; box-shadow: 0 12px 24px #0009; }
+.stack-gallery-card.actionable { cursor: pointer; }
+.stack-gallery-card.actionable > .face { outline: 3px solid var(--glow); outline-offset: 4px; }
+.stack-gallery-card:focus-visible { transform: translateY(-5px) scale(1.06); transition: none; outline: 2px solid var(--gold); outline-offset: 7px; }
+.stack-gallery-owner { margin-top: 12px; color: var(--gold); font: 600 12px var(--body); }
+.stack-gallery-item.theirs .stack-gallery-owner { color: #e7aaa0; }
+.stack-gallery-effect { max-height: 76px; margin-top: 6px; overflow-y: auto; scrollbar-width: thin; }
+.stack-gallery-effect p { font: 400 14px/1.45 var(--body); margin: 0; overflow-wrap: anywhere; }
+.stack-gallery-effect .stack-targets { margin-top: 5px; color: var(--muted); font-size: 12px; }
+.stack-gallery-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.forge .stack-gallery-actions .arena-btn { font-size: 13px; padding: 9px 12px; }
+.stack-gallery-actions .icon-btn { font-size: 12px; padding: 8px 10px; }
+.stack-gallery-help { flex-shrink: 0; margin: 0; padding: 6px 24px 16px; text-align: center; color: var(--muted); font: 400 12px var(--body); }
+@media (hover: hover) and (pointer: fine) { .stack-gallery-card:hover { transform: translateY(-5px) scale(1.06); z-index: 3; } }
+.history-inspect { border: 0; background: none; padding: 0; text-align: left; color: var(--ink); font: inherit; cursor: zoom-in; }
+.forge .log-drawer { background: var(--panel); width: min(350px, calc(100vw - 24px)); }
+.forge .log-drawer li { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.forge .action { right: 16px; bottom: 16px; width: 265px; max-width: 29vw; gap: 10px; }
+.forge .action .prompt { font-size: 14px; line-height: 1.45; text-align: right; width: 100%; max-height: 66px; overflow-y: auto; }
+.forge .action .btns { width: 100%; flex-direction: column; gap: 7px; align-items: stretch; }
+.forge .arena-btn { font: 600 14px/1.3 var(--body); letter-spacing: 0; text-transform: none; min-width: 0; padding: 11px 15px; border-radius: 999px; }
+.forge .action .arena-btn { flex: 1; }
+.forge .action .prompt-card { position: absolute; right: calc(100% + 12px); bottom: 4px; width: 100px; --fw: 100px; }
+.forge .icon-btn { font-size: 13px; min-height: 36px; }
+.forge .icon-btn:active, .forge .arena-btn:active:not(:disabled) { transform: scale(.96); }
+.game-settings { position: absolute; z-index: 30; top: 52px; left: 12px; width: min(320px, calc(100vw - 24px)); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 18px; box-shadow: 0 12px 30px #0005; }
+.game-settings h2 { margin: 0 0 15px; font: 600 18px var(--body); }
+.game-settings label { display: grid; gap: 8px; font-size: 14px; margin-top: 15px; }
+.game-settings input[type=range] { width: 100%; accent-color: var(--gold); }
+.game-settings select { padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-deep); color: var(--ink); font: inherit; }
+.game-settings .setting-line { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.game-settings .setting-line label { margin: 0; }
+.game-settings p { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 0; }
+.q-amounts { display: grid; gap: 12px; margin: 20px 0; }
+.q-amounts label { display: flex; align-items: center; justify-content: space-between; gap: 24px; font-size: 16px; }
+.q-amounts small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.q-amounts input { width: 94px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-deep); color: var(--ink); font: 500 16px var(--body); }
+.series-score { font: 600 13px var(--body); color: var(--muted); align-self: center; padding: 4px 8px; }
+.presentation-piece { position: fixed; z-index: 32; pointer-events: none; transform: translate(-50%, -50%); }
+.presentation-piece > .face { box-shadow: 0 12px 30px #0008, 0 0 0 2px var(--gold); }
+.presentation-caption { display: block; position: absolute; top: calc(100% + 9px); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(310px, 65vw); padding: 7px 12px; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font: 500 13px/1.35 var(--body); text-align: center; box-shadow: 0 4px 14px #0006; }
+.semantic-highlight .face { outline: 2px solid var(--gold); outline-offset: 3px; }
+.damage-flash .portrait, .bfc.damage-flash .face { outline: 3px solid var(--red); outline-offset: 3px; }
+.damage-flash .life { color: var(--red); box-shadow: 0 0 16px color-mix(in srgb, var(--red) 50%, transparent); }
+.player-damage { position: fixed; z-index: 36; pointer-events: none; transform: translate(-50%, -110%); text-align: center; color: var(--red); font: 800 34px/1.2 var(--body); text-shadow: 0 2px 4px var(--bg-deep), 0 0 2px var(--bg-deep); font-variant-numeric: tabular-nums; }
+.forge .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.sideboard-panel { width: min(850px, 94vw); max-height: 90dvh; overflow-y: auto; padding: 26px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); }
+.sideboard-panel h2 { font: 600 24px var(--display); margin: 0 0 8px; }
+.sideboard-panel > p { font-size: 14px; line-height: 1.5; color: var(--muted); }
+.sideboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+.sideboard-columns h3 { margin: 0 0 10px; font: 600 16px var(--body); }
+.sideboard-list { list-style: none; margin: 0; padding: 0; max-height: 42vh; overflow-y: auto; }
+.sideboard-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sideboard-list .sb-name { background: none; border: 0; color: var(--ink); text-align: left; padding: 0; flex: 1; cursor: zoom-in; }
+.sideboard-list .sb-count { min-width: 24px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sideboard-list .sb-move { min-width: 36px; min-height: 36px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--ink); }
+.sideboard-error { color: var(--red)!important; padding: 10px; border: 1px solid var(--red); border-radius: 8px; }
+.sideboard-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+@media (hover: hover) and (pointer: fine) { .inspect-card { opacity: 0; } .slot:hover > .inspect-card,.hand-slot:hover > .inspect-card,.stack-card-wrap:hover > .inspect-card,.inspect-card:focus-visible { opacity: 1; } }
+@media (max-width: 1100px) { .forge .field { padding-left: 18px; padding-right: 18px; } .forge .hand { left: 160px; right: 265px; } .forge .action { width: 235px; } }
+@media (max-width: 760px), (max-height: 500px) {
+  .forge { grid-template-columns: minmax(0, 1fr); --ch: clamp(62px, 16vh, 104px); --cw: calc(var(--ch) * .716); --lch: clamp(42px, 10vh, 66px); --lcw: calc(var(--lch) * .716); }
+  .forge .field { padding: 0 8px; }
+  .forge.has-stack .field { padding-right: 190px; }
+  .forge .row { min-height: calc(var(--ch) + 22px); padding: 12px 8px 10px; }
+  .forge .row.lands { min-height: calc(var(--lch) + 16px); padding: 8px; }
+  .forge .stack-panel { --stack-width: clamp(112px, 16vw, 165px); right: 12px; padding: 0; max-height: none; }
+  .forge .stack-panel .stack-heading { margin-bottom: 36px; }
+  .stack-layer { transform: translate(calc(var(--depth) * -5px), calc(var(--depth) * -10px)) rotate(calc(var(--depth) * -2deg)); }
+  .stack-open-hint { margin-top: 15px; font-size: 10px; }
+  .stack-top-label { font-size: 10px; padding: 4px 9px; }
+  .stack-gallery { --gallery-card-width: clamp(140px, (100dvh - 125px) * .716, 190px); }
+  .stack-gallery-heading { padding: 12px 18px 0; gap: 12px; }
+  .stack-gallery-heading h2 { font-size: 22px; }
+  .stack-gallery-heading p { font-size: 12px; margin-top: 4px; }
+  .stack-gallery-track { padding: 14px 24px 10px; gap: 28px; scroll-padding: 24px; }
+  .stack-gallery-item { display: grid; grid-template-columns: var(--gallery-card-width) 140px; grid-template-rows: 24px 20px minmax(0, 1fr) auto; column-gap: 14px; flex-basis: calc(var(--gallery-card-width) + 154px); width: calc(var(--gallery-card-width) + 154px); }
+  .stack-gallery-order { grid-area: 1 / 1 / 2 / 3; min-height: 18px; font-size: 11px; margin-bottom: 6px; }
+  .stack-gallery-card { grid-area: 2 / 1 / 5 / 2; }
+  .stack-gallery-owner { grid-area: 2 / 2; font-size: 12px; margin: 0; }
+  .stack-gallery-effect { grid-area: 3 / 2; align-self: start; max-height: 140px; margin-top: 4px; }
+  .stack-gallery-effect p { font-size: 13px; }
+  .stack-gallery-actions { grid-area: 4 / 2; flex-direction: column; align-items: stretch; gap: 5px; margin-top: 8px; }
+  .forge .stack-gallery-actions .arena-btn, .stack-gallery-actions .icon-btn { font-size: 12px; padding: 8px 9px; }
+  .stack-gallery-help { display: none; }
+  .forge .action { width: 190px; max-width: 30vw; right: 6px; bottom: 6px; gap: 6px; }
+  .forge .action .prompt { max-height: 43px; font-size: 12px; }
+  .forge .arena-btn { padding: 8px 10px; font-size: 12px; }
+  .forge .stack-panel h2 { font-size: 14px; }
+  .forge .phase-rail { display: none; }
+  .forge .hand { height: 28vh; max-width: none; left: 75px; right: 205px; padding: 15px 6px 3px; }
+  .forge .hand:not(.crowded) .hand-slot { width: 62px; height: 87px; margin-left: -16px; }
+  .forge .hand:not(.crowded) .hcard { --fw: 62px; }
+  .hand-slot { width: 62px; height: 87px; margin-left: -6px; }
+  .forge .hand-slot .hcard { --fw: 62px; }
+  .forge .hand-slot .hcost { font-size: 9px; }
+  .forge .portrait { width: 44px; height: 44px; }
+  .forge .avatar-slot.me { left: 8px; }
+  .forge .piles.me { display: none; }
+  .forge .piles.opp { top: 8px; right: 10px; }
+  .forge .life { min-width: 29px; height: 29px; font-size: 17px; }
+  .forge .pt { font-size: 12px; }
+  .forge .ctr.kw { min-width: 16px; min-height: 16px; }
+  .forge .ctr.kw svg { width: 12px; height: 12px; }
+  .series-score { font-size: 11px; padding: 0; }
+  .sideboard-columns { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .forge .slot.has-flying::before { animation: none; opacity: .45; } .stack-gallery-card { transition: none; } }

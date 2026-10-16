@@ -1,108 +1,58 @@
-import { deckSize, type DeckData } from '../decks';
-import { cardInfo, type CardInfo, type CardType } from '../cards';
+import './decks.css';
+import { countEntries, deckEntries, deckSize, type DeckData } from '../decks';
+import { cardInfo } from '../cards';
 import { cacheGet, fetchByNames } from '../scryfall';
-import { esc, manaHTML, pip } from './cardtext';
-import { deckArt, deckColors } from './lobby';
+import { esc, manaHTML, pip, richText } from './cardtext';
+import { deckArt, deckColors, groupedRows, statsHTML } from './deckStats';
+import { inspectCard } from './cardInspector';
 
-const GROUPS: [CardType, string][] = [
-  ['creature', 'Criaturas'], ['planeswalker', 'Planeswalkers'], ['instant', 'Instantâneas'], ['sorcery', 'Feitiços'],
-  ['artifact', 'Artefatos'], ['enchantment', 'Encantamentos'], ['battle', 'Batalhas'], ['other', 'Outras'], ['land', 'Terrenos'],
-];
-/** Faixas da curva de mana: 0, 1, … 5 e "6+". */
-const CURVE = ['0', '1', '2', '3', '4', '5', '6+'];
-
-interface Row { count: number; name: string; info?: CardInfo }
-
-function rows(deck: DeckData): Row[] {
-  return deck.cards.map(e => { const sc = cacheGet(e.name); return { ...e, info: sc ? cardInfo(sc) : undefined }; });
+interface DeckPreviewOptions {
+  selected: boolean;
+  onPick(): void;
+  pickLabel?: string;
+  onCopy?(): void;
+  onEdit?(): void;
 }
 
-function body(deck: DeckData) {
-  const all = rows(deck);
-  const known = all.filter(r => r.info);
-  const spells = known.filter(r => r.info!.type !== 'land');
-  const curve = CURVE.map(() => 0);
-  for (const r of spells) curve[Math.min(6, Math.round(r.info!.cmc))] += r.count;
-  const peak = Math.max(1, ...curve);
-  const spellCount = spells.reduce((s, r) => s + r.count, 0);
-  const avg = spellCount ? spells.reduce((s, r) => s + r.info!.cmc * r.count, 0) / spellCount : 0;
-
-  const row = (r: Row) => `<li><button class="dp-card" data-card="${esc(r.name)}">
-      <span class="dp-n">${r.count}</span><span class="dp-name">${esc(r.info?.label ?? r.name)}</span>
-      <span class="dp-cost">${r.info ? manaHTML(r.info.manaCost) : ''}</span>
-    </button></li>`;
-  const group = (label: string, list: Row[]) => list.length ? `<section class="dp-group">
-      <h3>${label} <small>${list.reduce((s, r) => s + r.count, 0)}</small></h3>
-      <ul>${list.map(row).join('')}</ul>
-    </section>` : '';
-  const byCost = (a: Row, b: Row) => a.info!.cmc - b.info!.cmc || a.name.localeCompare(b.name);
-
-  return `
-    <div class="dp-stats">
-      <div class="dp-curve" aria-label="Curva de mana">
-        ${curve.map((n, i) => `<span class="dp-bar" title="${n} carta(s) de custo ${CURVE[i]}">
-          <b>${n || ''}</b><i style="height:${(n / peak) * 100}%"></i><small>${CURVE[i]}</small></span>`).join('')}
-      </div>
-      <p class="dp-avg">Custo médio <b>${avg.toFixed(1).replace('.', ',')}</b></p>
-    </div>
-    <div class="dp-list">
-      ${GROUPS.map(([t, label]) => group(label, known.filter(r => r.info!.type === t).sort(byCost))).join('')}
-      ${group('Carregando…', all.filter(r => !r.info))}
-    </div>`;
-}
-
-/** Janela com a lista do deck por tipo, a curva de mana e a carta ampliada ao passar o mouse. */
-export function openDeckPreview(deck: DeckData, opts: { selected: boolean; onPick(): void }) {
+/** A readable deck overview; inspecting a card never selects or adds it. */
+export function openDeckPreview(deck: DeckData, opts: DeckPreviewOptions) {
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const dlg = document.createElement('dialog');
-  dlg.className = 'deck-preview';
-  dlg.setAttribute('aria-label', `Deck ${deck.name}`);
+  dlg.className = 'deck-preview dw-preview'; dlg.setAttribute('aria-label', `Deck ${deck.name}`);
   const art = deckArt(deck);
-  dlg.innerHTML = `
-    <header class="dp-head"${art ? ` style="background-image:linear-gradient(90deg, #0d1426 30%, rgba(13, 20, 38, 0.55)), url('${art}')"` : ''}>
-      <div>
-        <h2>${esc(deck.name)}</h2>
-        <p>${deckColors(deck).map(pip).join('')}<span>${deckSize(deck)} cartas · ${deck.builtin ? 'Deck pronto' : 'Seu deck'}</span></p>
-      </div>
-      <button class="dp-close" data-close aria-label="Fechar">✕</button>
-    </header>
-    <div class="dp-main">
-      <div class="dp-body"></div>
-      <figure class="dp-zoom" aria-hidden="true"><img alt=""></figure>
-    </div>
-    <footer class="dp-foot">
-      <button class="arena-btn secondary" data-close>Fechar</button>
-      <button class="arena-btn primary" data-pick ${opts.selected ? 'disabled' : ''}>${opts.selected ? 'Deck escolhido' : 'Escolher este deck'}</button>
-    </footer>`;
+  let inspected: string | undefined;
+  dlg.innerHTML = `<header class="dp-head"><div class="dw-preview-heading">${art ? `<img src="${esc(art)}" alt="">` : ''}<div><h2>${esc(deck.name)}</h2><p>${deckColors(deck).map(pip).join('')}<span>${deckSize(deck)} cartas · ${countEntries(deck.sideboard ?? [])} no sideboard · ${deck.builtin ? 'Deck pronto' : 'Seu deck'}</span></p></div></div><button type="button" class="dp-close" data-close aria-label="Fechar visualização do deck">×</button></header><div class="dp-main"><div class="dp-body"></div><aside class="dw-preview-card" aria-label="Carta em destaque"><div id="dpCard"></div></aside></div><footer class="dp-foot">${opts.onCopy ? '<button type="button" class="dw-button" data-copy>Criar uma cópia</button>' : ''}${opts.onEdit ? '<button type="button" class="dw-button" data-edit>Editar deck</button>' : ''}<button type="button" class="dw-button" data-close>Fechar</button><button type="button" class="dw-button primary" data-pick ${opts.selected ? 'disabled' : ''}>${opts.selected ? 'Deck escolhido' : esc(opts.pickLabel ?? 'Escolher este deck')}</button></footer>`;
   document.body.append(dlg);
 
-  const zoom = dlg.querySelector<HTMLElement>('.dp-zoom')!;
-  const img = zoom.querySelector('img')!;
-  const show = (name: string | undefined, pinned = false) => {
-    const sc = name ? cacheGet(name) : null;
-    const src = sc && cardInfo(sc).image;
-    if (src) img.src = src;
-    zoom.classList.toggle('empty', !src);
-    zoom.classList.toggle('pinned', pinned && !!src);
-  };
-  const render = () => {
-    dlg.querySelector('.dp-body')!.innerHTML = body(deck);
-    // Começa mostrando a carta que dá a arte do deck.
-    show(rows(deck).find(r => r.info?.artCrop === art)?.name);
-  };
+  function show(name?: string) {
+    inspected = name;
+    const sc = name ? cacheGet(name) : null, info = sc ? cardInfo(sc) : null;
+    const el = dlg.querySelector('#dpCard')!;
+    el.innerHTML = info ? `<button type="button" class="dw-preview-image" data-inspect="${esc(name!)}" aria-label="Ampliar e ler ${esc(info.label)}">${info.image ? `<img src="${esc(info.image)}" alt="">` : esc(info.label)}</button><h3>${esc(info.label)}</h3><p>${manaHTML(info.manaCost)}</p><div class="dw-oracle">${info.text.split('\n').filter(Boolean).map(p => `<p>${richText(p)}</p>`).join('')}</div>` : '<p class="dw-note">Escolha uma carta para ler seus detalhes.</p>';
+  }
+  function group(entries: DeckData['cards'], sideboard = false) {
+    return groupedRows(entries).map(g => `<section class="dp-group"><h3>${sideboard ? 'Sideboard · ' : ''}${g.label} <small>${countEntries(g.rows)}</small></h3><ul>${g.rows.map(row => `<li><button type="button" class="dp-card" data-card="${esc(row.name)}" aria-label="Ler ${esc(row.info?.label ?? row.name)}, ${row.count} ${row.count === 1 ? 'cópia' : 'cópias'}"><span class="dp-n">${row.count}</span><span class="dp-name">${esc(row.info?.label ?? row.name)}</span><span class="dp-cost">${row.info ? manaHTML(row.info.manaCost) : ''}</span></button></li>`).join('')}</ul></section>`).join('');
+  }
+  function render() {
+    dlg.querySelector('.dp-body')!.innerHTML = `${statsHTML(deck)}<div class="dp-list">${group(deck.cards)}</div>${deck.sideboard?.length ? `<details class="dw-preview-side"><summary>Sideboard <b>${countEntries(deck.sideboard)}</b></summary><div class="dp-list">${group(deck.sideboard, true)}</div></details>` : ''}`;
+    show(inspected ?? deck.cards.find(e => cacheGet(e.name))?.name);
+  }
   render();
-  if (deck.cards.some(e => !cacheGet(e.name))) fetchByNames(deck.cards.map(e => e.name)).then(() => dlg.open && render()).catch(() => {});
-
-  dlg.addEventListener('mouseover', e => { const c = (e.target as HTMLElement).closest<HTMLElement>('[data-card]'); if (c) show(c.dataset.card); });
-  dlg.addEventListener('focusin', e => { const c = (e.target as HTMLElement).closest<HTMLElement>('[data-card]'); if (c) show(c.dataset.card); });
-  dlg.addEventListener('click', e => {
-    const t = e.target as HTMLElement;
-    if (t === dlg || t.closest('[data-close]')) return dlg.close();
-    // Em telas estreitas a carta ampliada abre por cima da lista; um toque nela fecha.
-    if (t.closest('.dp-zoom')) return zoom.classList.remove('pinned');
-    const c = t.closest<HTMLElement>('[data-card]');
-    if (c) return show(c.dataset.card, true);
-    if (t.closest('[data-pick]')) { opts.onPick(); dlg.close(); }
+  fetchByNames(deckEntries(deck).map(e => e.name)).then(() => { if (dlg.open) render(); }).catch(() => {
+    if (dlg.open) { const p = document.createElement('p'); p.className = 'dw-error'; p.textContent = 'Algumas cartas não puderam ser carregadas. A lista continua disponível.'; dlg.querySelector('.dp-body')?.prepend(p); }
   });
-  dlg.addEventListener('close', () => dlg.remove());
+  const hover = (e: Event) => { const card = (e.target as HTMLElement).closest<HTMLElement>('[data-card]'); if (card) show(card.dataset.card); };
+  dlg.addEventListener('pointerover', e => { if (e.pointerType === 'mouse') hover(e); });
+  dlg.addEventListener('focusin', hover);
+  dlg.addEventListener('click', e => {
+    const target = e.target as HTMLElement;
+    if (target === dlg || target.closest('[data-close]')) { dlg.close(); return; }
+    const card = target.closest<HTMLElement>('[data-card],[data-inspect]');
+    if (card) { inspectCard({ name: card.dataset.card ?? card.dataset.inspect! }, card); return; }
+    if (target.closest('[data-pick]')) { dlg.close(); opts.onPick(); }
+    if (target.closest('[data-copy]')) { dlg.close(); opts.onCopy?.(); }
+    if (target.closest('[data-edit]')) { dlg.close(); opts.onEdit?.(); }
+  });
+  dlg.addEventListener('close', () => { dlg.remove(); if (opener?.isConnected) opener.focus({ preventScroll: true }); });
   dlg.showModal();
 }

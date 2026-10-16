@@ -7,6 +7,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -52,7 +53,14 @@ final class Rooms implements BridgeServer.Listener {
         }
     }
 
-    @Override public void onConnect(Channel ch) { }
+    @Override public void onConnect(Channel ch) {
+        JsonObject hello = new JsonObject();
+        hello.addProperty("type", "hello");
+        JsonArray formats = new JsonArray(); formats.add("free"); formats.add("pauper");
+        hello.add("supportedFormats", formats);
+        MatchConfig.versions(hello);
+        BridgeServer.send(ch, hello.toString());
+    }
 
     @Override
     public synchronized void onDisconnect(Channel ch) {
@@ -88,14 +96,35 @@ final class Rooms implements BridgeServer.Listener {
     @Override
     public void onMessage(Channel ch, String text) {
         JsonObject msg;
-        try { msg = JsonParser.parseString(text).getAsJsonObject(); } catch (RuntimeException e) { return; }
-        String type = msg.has("type") ? msg.get("type").getAsString() : "";
+        try { msg = JsonParser.parseString(text).getAsJsonObject(); }
+        catch (RuntimeException e) { BridgeServer.send(ch, Session.toast("error", "Mensagem inválida.")); return; }
+        String requestId = msg.has("requestId") && msg.get("requestId").isJsonPrimitive() ? msg.get("requestId").getAsString() : null;
         try {
+            String type = MatchConfig.string(msg, "type");
             switch (type) {
-                case "start" -> solo(ch, Decks.fromJson(msg.get("you"), "vermelho"), Decks.fromJson(msg.get("opponent"), "verde"));
-                case "host" -> host(ch, name(msg), Decks.fromJson(msg.get("deck"), "vermelho"));
-                case "join" -> join(ch, code(msg), name(msg), Decks.fromJson(msg.get("deck"), "verde"));
-                case "rejoin" -> rejoin(ch, code(msg), msg.has("token") ? msg.get("token").getAsString() : "");
+                case "validate-deck" -> {
+                    var result = DeckValidation.validate(msg.get("deck"), MatchConfig.string(msg, "format"));
+                    JsonObject response = new JsonObject(); response.addProperty("type", "validation");
+                    response.addProperty("requestId", requestId); response.add("validation", result.json());
+                    BridgeServer.send(ch, response.toString());
+                }
+                case "lookup-room" -> lookup(ch, code(msg), requestId);
+                case "hello" -> onConnect(ch);
+                case "start" -> {
+                    MatchConfig config = MatchConfig.parse(msg.get("config"));
+                    Deck you = validated(msg.get("you"), config.format(), "you");
+                    JsonElement opponent = msg.get("opponent");
+                    Deck ai = opponent == null || opponent.isJsonNull()
+                        || (opponent.isJsonPrimitive() && "random".equals(opponent.getAsString()))
+                        ? Decks.random(config.format()) : validated(opponent, config.format(), "opponent");
+                    solo(ch, you, ai, config);
+                }
+                case "host" -> {
+                    MatchConfig config = MatchConfig.parse(msg.get("config"));
+                    host(ch, name(msg), validated(msg.get("deck"), config.format(), "deck"), config);
+                }
+                case "join" -> join(ch, code(msg), name(msg), msg.get("deck"));
+                case "rejoin" -> rejoin(ch, code(msg), msg.has("token") ? MatchConfig.string(msg, "token") : "");
                 case "rematch" -> rematch(ch);
                 case "leave" -> leave(ch);
                 default -> {
@@ -104,10 +133,38 @@ final class Rooms implements BridgeServer.Listener {
                     if (seat != null) s.onClientMessage(seat, type, msg);
                 }
             }
+        } catch (InvalidDeck e) {
+            JsonObject response = new JsonObject(); response.addProperty("type", "validation-error");
+            response.addProperty("target", e.target); response.add("validation", e.result.json());
+            if (requestId != null) response.addProperty("requestId", requestId);
+            BridgeServer.send(ch, response.toString());
         } catch (RuntimeException e) {
-            e.printStackTrace();
-            BridgeServer.send(ch, Session.toast("error", String.valueOf(e.getMessage())));
+            JsonObject response = new JsonObject();
+            response.addProperty("type", requestId == null ? "error" : "request-error");
+            response.addProperty("text", e.getMessage() == null ? "Não foi possível concluir esta ação." : e.getMessage());
+            if (requestId != null) response.addProperty("requestId", requestId);
+            BridgeServer.send(ch, response.toString());
         }
+    }
+
+    private static final class InvalidDeck extends IllegalArgumentException {
+        final DeckValidation.Result result;
+        final String target;
+        InvalidDeck(DeckValidation.Result result, String target) { this.result = result; this.target = target; }
+    }
+
+    private static Deck validated(JsonElement payload, String format, String target) {
+        var result = "opponent".equals(target) ? DeckValidation.validateForAi(payload, format) : DeckValidation.validate(payload, format);
+        if (!result.valid()) throw new InvalidDeck(result, target);
+        return result.deck();
+    }
+
+    private synchronized void lookup(Channel ch, String code, String requestId) {
+        Session s = byCode.get(code);
+        if (s == null || !s.isRoom()) throw new IllegalArgumentException("Não existe sala com o código " + code + ".");
+        JsonObject response = new JsonObject(); response.addProperty("type", "room-info");
+        response.addProperty("requestId", requestId); response.add("room", s.publicRoomJson());
+        BridgeServer.send(ch, response.toString());
     }
 
     private static String name(JsonObject msg) {
@@ -139,28 +196,29 @@ final class Rooms implements BridgeServer.Listener {
 
     // ---------- Partidas ----------
 
-    private synchronized void solo(Channel ch, Deck you, Deck opponent) {
+    private synchronized void solo(Channel ch, Deck you, Deck opponent, MatchConfig config) {
         leave(ch);
-        Session s = Session.solo(newCode(8), ch, you, opponent);
+        Session s = Session.solo(newCode(8), ch, you, opponent, config);
         byCode.put(s.code, s);
         byChannel.put(ch, s);
         s.start();
     }
 
-    private synchronized void host(Channel ch, String name, Deck deck) {
+    private synchronized void host(Channel ch, String name, Deck deck, MatchConfig config) {
         leave(ch);
-        Session s = Session.room(newCode(4), ch, name, deck);
+        Session s = Session.room(newCode(4), ch, name, deck, config);
         byCode.put(s.code, s);
         byChannel.put(ch, s);
         s.sendRoom(s.seats[0]);
         System.out.printf("Sala %s criada por %s (%s)%n", s.code, name, deck.getName());
     }
 
-    private synchronized void join(Channel ch, String code, String name, Deck deck) {
+    private synchronized void join(Channel ch, String code, String name, JsonElement payload) {
         Session s = byCode.get(code);
         if (s == null || !s.isRoom()) throw new IllegalArgumentException("Não existe sala com o código " + code + ".");
         if (s.seatOf(ch) != null) return;
         if (s.full()) throw new IllegalArgumentException("A sala " + code + " já está cheia.");
+        Deck deck = validated(payload, s.config.format(), "deck");
         leave(ch);
         Session.Seat seat = s.seats[1];
         seat.bind(ch, name, deck);
@@ -202,6 +260,7 @@ final class Rooms implements BridgeServer.Listener {
         Session s = byChannel.get(ch);
         Session.Seat seat = s == null ? null : s.seatOf(ch);
         if (seat == null) return;
+        if (!s.matchOver()) throw new IllegalArgumentException("Conclua a partida antes de pedir uma revanche.");
         if (!s.isRoom()) { s.start(); return; }
         if (!s.full()) return;
         for (Session.Seat each : s.seats) {
@@ -215,14 +274,14 @@ final class Rooms implements BridgeServer.Listener {
         s.markDirty();
     }
 
-    /** Sai da partida atual, se houver. Numa sala, quem sai concede; a sala fecha quando não sobra ninguém. */
+    /** Sai da partida atual e encerra a série; a sala fecha quando não sobra ninguém. */
     private synchronized void leave(Channel ch) {
         Session s = byChannel.remove(ch);
         if (s == null) return;
         Session.Seat seat = s.seatOf(ch);
         if (!s.isRoom()) { close(s); return; }
         if (seat != null) {
-            s.concede(seat);
+            s.abandon(seat);
             seat.channel = null;
             seat.rematch = false;
         }

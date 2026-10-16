@@ -25,10 +25,20 @@
       <artifactId>forge-gui</artifactId>
       <version>${forge.version}</version>
     </dependency>
+    <dependency>
+      <groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
+    <resources>
+      <resource><directory>../shared</directory><includes><include>starter-decks.json</include><include>pauper-legality.json</include></includes></resource>
+    </resources>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.1.2</version>
+        <configuration><systemPropertyVariables><forge.dir>${forge.dir}</forge.dir></systemPropertyVariables></configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

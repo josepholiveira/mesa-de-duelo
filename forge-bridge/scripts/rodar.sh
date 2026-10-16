@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Compila e roda a ponte do Forge. Argumentos são repassados: ./rodar.sh --mode=watch --delay=200
+# Build and run. Set FORGE_DIR, M2_REPO, JAVA_HOME and MVN for portable installations.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if [ -z "${JAVA_HOME:-}" ] && [ -d "$HOME/.local/opt/jdk-17" ]; then export JAVA_HOME="$HOME/.local/opt/jdk-17"; fi
-[ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
-MVN=mvn
-command -v mvn >/dev/null 2>&1 || MVN="$HOME/.local/opt/apache-maven-3.9.9/bin/mvn"
+FORGE_DIR="${FORGE_DIR:-$HOME/forge}"
+M2="${M2_REPO:-$HOME/.m2/repository}"
+MVN="${MVN:-mvn}"
+if [ -n "${JAVA_HOME:-}" ]; then export PATH="$JAVA_HOME/bin:$PATH"; fi
 export MAVEN_OPTS="${MAVEN_OPTS:--Xmx2g}"
-exec "$MVN" -q -B compile exec:java -Dexec.args="$*"
+exec "$MVN" -B -ntp "-Dmaven.repo.local=$M2" "-Dforge.dir=$FORGE_DIR" compile exec:java "-Dexec.args=$*"

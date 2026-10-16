@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:protocol": "node forge-bridge/scripts/test-protocol.mjs",
     "forge": "bash forge-bridge/scripts/rodar.sh",
     "forge:rede": "bash forge-bridge/scripts/rodar.sh --host=0.0.0.0",
     "forge:instalar": "bash forge-bridge/scripts/instalar-forge.sh"

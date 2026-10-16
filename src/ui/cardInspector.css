@@ -1,0 +1,38 @@
+.card-inspector-preview, .card-inspector { color: var(--ink); background: #101a2e; border: 1px solid #3a4768; box-shadow: 0 12px 40px #0008; border-radius: 16px; padding: 0; font: 16px/1.5 var(--body); overflow: hidden; }
+.card-inspector-preview { position: fixed; z-index: 80; top: 56px; left: 16px; width: min(380px, calc((100dvh - 136px) * .714)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 96px); display: flex; flex-direction: column; text-align: left; border-radius: 14px; }
+.card-inspector-preview:has(.ci-image) .ci-head { order: 2; padding: 0; border: 0; }
+.card-inspector-preview:has(.ci-image) .ci-head > div { display: none; }
+.card-inspector-preview:has(.ci-image) .ci-control { width: 100%; border: 0; border-radius: 0; min-height: 36px; padding: 5px 12px; background: #111c30; }
+.card-inspector-preview:has(.ci-image) .ci-body { padding: 0; overflow: hidden; }
+.card-inspector-preview:has(.ci-image) .ci-details { display: none; }
+.card-inspector-preview .ci-image { width: 100%; max-height: none; margin: 0; border-radius: 10px; }
+.card-inspector-preview.on-table { pointer-events: none; }
+.card-inspector-preview.on-table .ci-control, .card-inspector-preview.on-table:has(.ci-image) .ci-head { display: none; }
+.ci-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.ci-head h2 { margin: 0; font: 600 20px/1.25 var(--display); overflow-wrap: anywhere; }
+.ci-cost { display: flex; gap: 2px; margin-top: 8px; font-size: 20px; }
+.ci-control { padding: 8px 12px; min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #1a2944; cursor: pointer; font-size: 14px; flex-shrink: 0; }
+.ci-control:hover { border-color: var(--gold); }
+.ci-body { padding: 16px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.ci-image { display: block; max-height: 190px; max-width: 100%; margin: 0 auto 16px; object-fit: contain; border-radius: 8px; outline: 1px solid #ffffff1a; }
+.ci-type { margin: 0 0 12px; color: #c0cbe0; font-size: 14px; }
+.ci-rules { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; line-height: 1.55; }
+.ci-rules .pip { font-size: 0.9em; }
+.ci-strength { border-top: 1px solid var(--line); padding-top: 12px; font-variant-numeric: tabular-nums; }
+.ci-strength strong { font-size: 22px; }
+.ci-strength span, .ci-note { color: var(--muted); font-size: 14px; }
+.ci-keywords { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 12px 0; padding: 0; }
+.ci-keywords li { border-radius: 6px; padding: 3px 8px; background: #1d3050; font-size: 14px; }
+.card-inspector { width: min(780px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+.card-inspector[open] { display: flex; flex-direction: column; }
+.card-inspector::backdrop { background: #000a; }
+.card-inspector .ci-body { display: grid; grid-template-columns: minmax(160px, 270px) minmax(0, 1fr); gap: 24px; padding: 24px; }
+.card-inspector .ci-image { max-height: none; width: 100%; margin: 0; align-self: start; }
+.card-inspector .ci-no-image { grid-template-columns: 1fr; }
+.card-inspector .ci-head h2 { font-size: 24px; }
+@media (max-width: 700px) {
+  .card-inspector-preview { top: 12px; max-height: calc(100dvh - 24px); width: min(380px, calc(100vw - 32px), calc((100dvh - 64px) * .714)); }
+  .card-inspector .ci-body { grid-template-columns: 1fr; gap: 16px; padding: 16px; }
+  .card-inspector .ci-image { max-height: 260px; width: auto; max-width: 100%; margin: auto; }
+}
+@media (max-height: 500px) { .card-inspector-preview { top: 8px; max-height: calc(100dvh - 16px); width: min(380px, calc((100dvh - 56px) * .714)); } }

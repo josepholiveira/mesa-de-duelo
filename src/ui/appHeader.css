@@ -1,0 +1,26 @@
+.shared-shell-header.home-top {
+  position: relative; z-index: 5; width: min(1180px, 100%); min-height: 72px;
+  margin: 0 auto; padding: 0; flex-shrink: 0; display: flex; align-items: center;
+  flex-wrap: nowrap; gap: 40px; border-bottom: 1px solid var(--line);
+  color: var(--ink); font-family: var(--body, sans-serif);
+}
+.shared-shell-header .home-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); font: 600 21px/1.2 var(--display, sans-serif); text-decoration: none; white-space: nowrap; }
+.shared-shell-header .brand-mark { position: relative; width: 28px; height: 34px; border-radius: 5px; transform: rotate(-9deg); flex-shrink: 0; }
+.shared-shell-header .brand-mark::after { content: ''; position: absolute; inset: 4px; border: 1px solid #51340b90; border-radius: 3px; }
+.shared-shell-header.home-top nav { display: flex; align-items: center; align-self: stretch; gap: 8px; order: 0; width: auto; }
+.shared-shell-header .home-nav { min-height: 44px; padding: 8px 16px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; font: 600 15px/1.35 var(--body, sans-serif); }
+.shared-shell-header .home-nav.active { color: var(--gold-light); background: #f2b54c0c; box-shadow: inset 0 -2px var(--gold); }
+.shared-shell-header .home-nav:disabled, .shared-shell-header [aria-disabled='true'] { opacity: .55; cursor: default; }
+.shared-shell-header .home-news { margin-left: auto; }
+.shared-shell-header .home-news .news { position: relative; inset: auto; }
+.shared-shell-header .news-btn { min-height: 40px; }
+.shared-shell-header :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) { .shared-shell-header .home-nav:hover:not(:disabled) { color: var(--ink); background: #ffffff08; } }
+@media (max-width: 700px) {
+  .shared-shell-header.home-top { min-height: 72px; gap: 12px; padding: 14px 0 8px; flex-wrap: wrap; }
+  .shared-shell-header .home-brand { font-size: 19px; gap: 9px; }
+  .shared-shell-header.home-top nav { order: 3; width: 100%; }
+  .shared-shell-header .home-nav { flex: 1; }
+  .shared-shell-header .news-btn { padding: 6px 10px; font-size: 13px; }
+  .shared-shell-header .news-ver { display: none; }
+}

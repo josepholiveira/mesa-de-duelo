@@ -1,0 +1,119 @@
+.lobby.library-home { padding: 0 32px 40px; min-height: 100dvh; }
+.library-home .mat { background: radial-gradient(ellipse at 60% 12%, #192b47 0%, #101b2e 42%, #080e1b 100%); }
+.home-content { position: relative; z-index: 1; width: min(1180px, 100%); margin: auto; }
+.home-intro { margin: 24px 0 28px; }
+.home-intro h1 { font: 600 clamp(30px, 3vw, 38px)/1.12 var(--display); margin: 0 0 8px; letter-spacing: -.025em; }
+.home-intro p { color: var(--muted); margin: 0; font-size: 15px; }
+.play-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 36px; align-items: start; }
+.match-sidebar { grid-column: 2; grid-row: 1; position: sticky; top: 24px; padding-left: 28px; border-left: 1px solid #ffffff14; }
+.match-choice { border: 0; margin: 0 0 14px; padding: 0; min-width: 0; }
+.match-choice legend { font-weight: 600; font-size: 14px; padding: 0; margin-bottom: 6px; color: #d8dfec; }
+.choice-segments { display: flex; padding: 4px; gap: 3px; border-radius: 10px; background: #070e1bb3; box-shadow: inset 0 0 0 1px #ffffff10; }
+.choice-segments button { flex: 1; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 8px 10px; min-height: 40px; font-size: 14px; white-space: nowrap; }
+.choice-segments button[aria-pressed=true] { color: var(--gold-light); border-color: #f2b54c55; background: linear-gradient(#3b332599, #2b281f99); box-shadow: 0 2px 4px #0003; }
+.choice-segments button:disabled, .opponent-card:disabled { cursor: default; opacity: .55; }
+.setup-explanation { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
+.opponent-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.opponent-card { display: flex; align-items: center; justify-content: center; text-align: center; gap: 7px; min-height: 44px; border-radius: 10px; border: 1px solid #ffffff16; background: #14213980; padding: 9px 7px; color: var(--muted); cursor: pointer; }
+.opponent-card svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.opponent-card > span { display: flex; flex-direction: column; gap: 4px; }
+.opponent-card strong { font-size: 14px; font-weight: 600; color: var(--ink); }
+.opponent-card[aria-pressed=true] { border-color: #cb9b4c90; color: var(--gold-light); background: linear-gradient(110deg, #edb44e12, #152039); }
+.opponent-choice { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; font-size: 14px; color: #d8dfec; }
+.opponent-choice label { font-weight: 600; }
+.opponent-choice .input-field { margin: 0; width: 100%; min-height: 44px; font-size: 14px; padding: 9px 11px; }
+.match-ready { background: #070d19a3; border-radius: 12px; padding: 14px; box-shadow: inset 0 1px 0 #ffffff06; }
+.chosen-deck { position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; margin-bottom: 12px; }
+.chosen-deck:has(.chosen-art) { padding-left: 54px; min-height: 52px; }
+.chosen-deck .chosen-art { position: absolute; left: 0; top: 2px; width: 42px; height: 52px; background-position: center 30%; background-size: cover; border-radius: 6px; margin: 0; outline: 1px solid #ffffff14; }
+.chosen-deck strong { font: 600 17px/1.25 var(--display); overflow-wrap: anywhere; }
+.chosen-deck > span { font-size: 12px; color: var(--muted); }
+.chosen-deck .chosen-caption { color: var(--gold-light); font-size: 12px; }
+.match-ready .arena-btn.big { width: 100%; min-width: 0; min-height: 48px; font-size: 18px; }
+.match-ready .lobby-status { margin: 12px 0 0; font-size: 13px; }
+.match-ready .lobby-status:empty { display: none; }
+.deck-collection { min-width: 0; grid-column: 1; grid-row: 1; }
+.deck-shelf { margin: 0 0 28px; }
+.shelf-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 0 16px; min-height: 44px; }
+.shelf-heading h2 { margin: 0; font: 600 22px var(--display); }
+.shelf-heading h2 span { font: 400 15px var(--body); color: var(--muted); margin-left: 7px; }
+.shelf-heading p { margin: 5px 0 0; font-size: 14px; color: var(--muted); }
+.shelf-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.shelf-actions .arena-btn { min-width: 105px; font-size: 14px; }
+.shelf-actions .ghost-btn { font-size: 14px; }
+.library-home .deck-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.library-home .deck-tile { border: 1px solid #ffffff18; background: #101b2d; box-shadow: 0 6px 16px #0004, 0 1px 1px #ffffff05; border-radius: 12px; }
+.library-home .deck-tile.on { border-color: var(--gold); box-shadow: 0 0 0 1px #e7b04b80, 0 8px 20px #0005; }
+.library-home .tile-art { aspect-ratio: 1.55; background-position: center 30%; }
+.library-home .tile-info { padding: 14px 42px 16px 14px; gap: 8px; }
+.library-home .tile-name { font-size: 18px; font-weight: 600; white-space: normal; line-height: 1.25; min-height: 1.25em; }
+.library-home .tile-meta, .tile-validity { font-size: 12px; color: var(--muted); }
+.library-home .tile-peek { width: 38px; height: 38px; right: 7px; bottom: 12px; }
+.personal-empty { grid-column: 1/-1; display: flex; align-items: center; gap: 28px; padding: 26px 32px; min-height: 190px; border-radius: 14px; border: 1px solid #ffffff12; background: radial-gradient(ellipse at 10% 50%, #29416344, transparent 60%), #14213899; }
+.personal-empty h3 { font: 600 22px var(--display); margin: 0 0 8px; }
+.personal-empty p { color: var(--muted); max-width: 460px; margin: 0 0 18px; font-size: 14px; line-height: 1.5; }
+.personal-empty .arena-btn { font-size: 14px; }
+.empty-cards { width: 96px; height: 112px; flex-shrink: 0; position: relative; }
+.empty-cards i { position: absolute; width: 64px; height: 92px; background: #182b46; border: 1px solid #596b89; border-radius: 7px; left: 16px; top: 10px; transform: rotate(-16deg); box-shadow: 2px 5px 10px #0004; }
+.empty-cards i:nth-child(2) { transform: rotate(-3deg); }
+.empty-cards i:nth-child(3) { transform: rotate(10deg); border-color: #b28b4b; background: #1d304d; }
+.empty-cards i:nth-child(3)::after { content: '+'; position: absolute; inset: 8px; display: grid; place-items: center; border: 1px solid #b28b4b44; border-radius: 4px; color: #c39c5f; font: 32px var(--body); }
+.shelf-empty { grid-column: 1/-1; padding: 20px; border: 1px dashed var(--line); color: var(--muted); }
+.library-toolbar { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; border-top: 1px solid #ffffff0b; }
+.library-toolbar .search { max-width: 260px; flex: 1; background: transparent; border: 0; }
+.library-toolbar .search svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; flex-shrink: 0; }
+.library-toolbar .search input { padding: 12px 0; font-size: 14px; }
+.incompatible-toggle { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--muted); }
+.library-home input[type=checkbox] { accent-color: var(--gold); width: 16px; height: 16px; }
+.network-setup { display: grid; gap: 16px; margin: 0 0 20px; }
+.network-setup label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--muted); }
+.network-setup .input-field { width: 100%; min-width: 0; font-size: 14px; }
+.network-setup form { margin: 0; }
+.network-code { display: flex; gap: 6px; }
+.network-code input { text-transform: uppercase; }
+.network-code button { padding: 8px 12px; min-width: 65px; font-size: 13px; }
+.network-setup .net-adv { font-size: 13px; }
+.network-setup .net-adv label { margin-top: 10px; }
+.room-info { padding: 12px; border-left: 2px solid var(--gold); background: #f2b54c08; font-size: 13px; }
+.room-info p { margin: 0 0 8px; }
+.room-info .ghost-btn { padding: 8px 0; font-size: 13px; white-space: normal; }
+@media (max-width: 1050px) {
+  .play-layout { grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; }
+  .match-sidebar { padding-left: 22px; }
+  .library-home .deck-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .personal-empty { padding: 24px; gap: 20px; }
+  .empty-cards { width: 64px; }
+  .empty-cards i { left: 0; }
+}
+@media (max-width: 700px) {
+  .lobby.library-home { padding: 0 16px 32px; }
+  .home-intro { margin: 24px 0; }
+  .play-layout { display: flex; flex-direction: column; gap: 28px; }
+  .match-sidebar { position: static; width: 100%; border-left: 0; padding: 0 0 24px; border-bottom: 1px solid #ffffff14; display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+  .match-choice { margin-bottom: 16px; }
+  .match-choice:has(.opponent-cards) { grid-column: 1/-1; grid-row: 2; }
+  .opponent-cards { grid-template-columns: 1fr 1fr; }
+  .opponent-card { padding: 10px 8px; gap: 8px; }
+  .opponent-card svg { width: 20px; height: 20px; flex-basis: 20px; }
+  .opponent-card strong { font-size: 14px; }
+  .choice-segments button { font-size: 13px; padding: 8px; }
+  .setup-explanation { min-height: 0; }
+  .opponent-choice, .network-setup, .match-ready { grid-column: 1/-1; }
+  .match-ready { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+  .chosen-deck, .chosen-deck:has(.chosen-art) { margin: 0; padding-left: 0; min-height: 0; }
+  .chosen-deck .chosen-art { display: none; }
+  .match-ready .arena-btn.big { width: auto; min-width: 110px; }
+  .match-ready .lobby-status { grid-column: 1/-1; margin: 0; }
+  .deck-collection { width: 100%; }
+  .shelf-heading { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .shelf-heading h2 { font-size: 21px; }
+  .shelf-actions { gap: 4px; }
+  .shelf-actions .arena-btn { min-width: 90px; }
+  .personal-empty { padding: 24px; }
+  .empty-cards { display: none; }
+  .personal-empty h3 { font-size: 21px; }
+  .library-home .deck-tiles { gap: 12px; }
+  .library-home .tile-info { padding: 12px 12px 52px; }
+  .library-home .tile-name { font-size: 17px; }
+  .library-home .tile-peek { width: 44px; height: 44px; }
+}

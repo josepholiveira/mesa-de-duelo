@@ -12,15 +12,16 @@ RUN VERSION=$(mvn -q -B help:evaluate -Dexpression=revision -DforceStdout) \
  && find /root/.m2/repository/forge -name '*.lastUpdated' -delete \
  && rm -rf forge-gui/src forge-gui/target
 WORKDIR /bridge
-COPY pom.xml .
-COPY src ./src
+COPY forge-bridge/pom.xml .
+COPY forge-bridge/src ./src
+COPY shared /shared
 RUN mvn -q -B package -DskipTests && mvn -q -B dependency:copy-dependencies -DoutputDirectory=target/lib
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /forge/forge-gui /opt/forge/forge-gui
 COPY --from=build /bridge/target/lib ./lib
-COPY --from=build /bridge/target/forge-bridge-*.jar ./lib/
+COPY --from=build /bridge/target/forge-bridge-*.jar ./forge-bridge.jar
 ENV JAVA_OPTS="-Xmx2g"
 EXPOSE 7171
-CMD ["sh", "-c", "exec java $JAVA_OPTS -Dforge.dir=/opt/forge -cp '/app/lib/*' mesadeduelo.bridge.Main --host=0.0.0.0 --port=7171"]
+CMD ["sh", "-c", "exec java $JAVA_OPTS -Dforge.dir=/opt/forge -cp '/app/forge-bridge.jar:/app/lib/*' mesadeduelo.bridge.Main --host=0.0.0.0 --port=7171"]

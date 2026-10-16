@@ -1,4 +1,23 @@
+import type { DeckData, DeckEntry, DeckFormat } from '../decks';
+
 /** Cliente da ponte do Forge (forge-bridge). Formato das mensagens descrito em forge-bridge/README.md. */
+
+export interface MatchConfig { format: DeckFormat; matchLength: 'bo1' | 'bo3' }
+export interface ValidationIssue { code: string; message: string; card?: string; section?: string }
+export interface DeckValidation { valid: boolean; issues: ValidationIssue[]; mainCount?: number; sideboardCount?: number; rulesVersion: string; engineVersion: string }
+export interface RoomInfo { code: string; config: MatchConfig; available: boolean; players: {name: string; connected: boolean}[]; rulesVersion: string; engineVersion: string }
+export interface FEvent {
+  seq: number; stateVersion: number;
+  type: 'land-played' | 'spell-cast' | 'ability-activated' | 'resolved' | 'countered' | 'entered' | 'left' | 'attackers' | 'blockers' | 'damage' | 'life-changed' | 'turn' | 'priority' | 'draw' | 'stack-removed';
+  actor?: number; cards?: number[]; card?: FCard; sourceId?: number; stackId?: number; targets?: FTargets;
+  text?: string; from?: string; to?: string; delta?: number;
+  frame?: {players: Pick<FPlayer, 'id' | 'life' | 'battlefield' | 'handCount' | 'library'>[]; stack: FState['stack']; turn: number; phase: string | null; activePlayer: number | null; combat?: FState['combat']};
+}
+export interface FMatch {
+  gameNumber: number; wins: number[]; draws: number; over: boolean; abandoned?: boolean;
+  phase: 'playing' | 'sideboarding' | 'complete'; ready: boolean[];
+}
+export interface FSideboarding { id: number; main: DeckEntry[]; sideboard: DeckEntry[]; ready: boolean }
 
 export interface FCard {
   id: number;
@@ -54,14 +73,15 @@ export interface FPlayer {
   pool: Record<string, number>;
 }
 
-export interface FOption { kind?: 'card' | 'player'; card?: FCard; id?: number; label: string }
+export interface FOption { kind?: 'card' | 'player'; card?: FCard; id?: number; label: string; min?: number; max?: number }
 
 export interface FQuestion {
   id: number;
   method: string;
   /** reveal: só mostra as cartas (Explore, revelar o topo...); responde com indices vazio. */
-  kind: 'choose' | 'confirm' | 'order' | 'text' | 'reveal';
+  kind: 'choose' | 'confirm' | 'order' | 'text' | 'reveal' | 'amount';
   title: string;
+  total?: number;
   min?: number;
   max?: number;
   options?: (FOption | string)[];
@@ -78,11 +98,23 @@ export interface FRoom {
   seat: number;
   token: string;
   started: boolean;
+  config: MatchConfig;
+  rulesVersion?: string;
+  engineVersion?: string;
   players: { name: string; connected: boolean; rematch: boolean }[];
 }
 
 export interface FState {
   type: 'state';
+  config?: MatchConfig;
+  match?: FMatch;
+  sideboarding?: FSideboarding;
+  matchId?: string;
+  events?: FEvent[];
+  eventCursor?: number;
+  stateVersion?: number;
+  rulesVersion?: string;
+  engineVersion?: string;
   turn: number;
   phase: string | null;
   activePlayer: number | null;
@@ -100,7 +132,7 @@ export interface FState {
   /** card: carta citada pelo prompt (ex.: a do topo do grimório na vidência ou na vigilância de 1). */
   /** paying: pagando um custo de mana; a mana da reserva pode ser gasta com {type:"mana", color}. */
   /** targeting: escolhendo alvos; source é a carta que alveja (card traz os dados dela) e o resto são os alvos já escolhidos. */
-  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
+  input: { gen: number; priority?: boolean; opening?: 'play-draw' | 'mulligan' | 'mulligan-bottom'; openingStartingPlayer?: number; openingReturnCount?: number; openingReturnRemaining?: number; openingSelected?: number[]; message: string; ok: FButton; cancel: FButton; selectable: number[]; selectableStacks?: number[]; selectablePlayers?: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
     targeting?: FTargets & { source: number; card?: FCard } };
   question?: FQuestion;
   room?: FRoom;
@@ -113,16 +145,20 @@ export interface FState {
 export interface FTargets { cards?: number[]; players?: number[] }
 
 export type ClientMessage =
-  | { type: 'start'; you: unknown; opponent: unknown }
-  | { type: 'host'; name: string; deck: unknown }
+  | { type: 'start'; you: unknown; opponent: unknown; config: MatchConfig }
+  | { type: 'host'; name: string; deck: unknown; config: MatchConfig }
   | { type: 'join'; code: string; name: string; deck: unknown }
   | { type: 'rejoin'; code: string; token: string }
+  | { type: 'validate-deck'; requestId: string; format: DeckFormat; deck: unknown }
+  | { type: 'lookup-room'; requestId: string; code: string }
+  | { type: 'sideboard'; id: number; deck: unknown } | { type: 'next-game'; id: number }
   | { type: 'rematch' } | { type: 'leave' }
-  | { type: 'card'; id: number }
-  | { type: 'player'; id: number }
-  | { type: 'mana'; color: string }
-  | { type: 'ok' | 'cancel'; gen?: number } | { type: 'concede' } | { type: 'hello' }
-  | { type: 'answer'; id: number; indices?: number[]; value?: boolean; text?: string };
+  | { type: 'card'; id: number; gen?: number }
+  | { type: 'stack'; id: number; gen?: number }
+  | { type: 'player'; id: number; gen?: number }
+  | { type: 'mana'; color: string; gen?: number }
+  | { type: 'ok' | 'cancel' | 'pass-turn'; gen?: number } | { type: 'concede' } | { type: 'hello' }
+  | { type: 'answer'; id: number; indices?: number[]; amounts?: number[]; value?: boolean; text?: string };
 
 /**
  * Endereço padrão da ponte: a mesma máquina que serviu a página. Assim, quem abre a página pela rede
@@ -138,7 +174,7 @@ function defaultUrl() {
   return `ws://${host.includes(':') ? `[${host}]` : host}:7171/ws`;
 }
 
-export const FORGE_URL: string = import.meta.env.VITE_FORGE_URL ?? defaultUrl();
+export const FORGE_URL: string = import.meta.env?.VITE_FORGE_URL ?? defaultUrl();
 
 export class ForgeClient {
   private ws: WebSocket | null = null;
@@ -152,6 +188,31 @@ export class ForgeClient {
   onGone: (text: string) => void = () => {};
   onNotice: (text: string, error: boolean) => void = () => {};
   onClose: () => void = () => {};
+  onValidation: (validation: DeckValidation, target: string) => void = () => {};
+  onHello: (info: {supportedFormats: DeckFormat[]; rulesVersion: string; engineVersion: string}) => void = () => {};
+  private requestSequence = 0;
+  private pending = new Map<string, {resolve: (value: any) => void; reject: (reason: Error) => void; timer: ReturnType<typeof setTimeout>}>();
+
+  private rejectPending(reason: string) {
+    for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error(reason)); }
+    this.pending.clear();
+  }
+
+  private request<T>(message: { type: 'validate-deck'; format: DeckFormat; deck: unknown } | { type: 'lookup-room'; code: string }): Promise<T> {
+    if (!this.connected) return Promise.reject(new Error('Conecte-se ao servidor para verificar.'));
+    const requestId = `request-${++this.requestSequence}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(requestId); reject(new Error('O servidor demorou para responder. Tente novamente.')); }, 12000);
+      this.pending.set(requestId, {resolve, reject, timer});
+      this.send({...message, requestId});
+    });
+  }
+
+  validateDeck(deck: Pick<DeckData, 'name' | 'cards' | 'sideboard'>, format: DeckFormat): Promise<DeckValidation> {
+    return this.request({type: 'validate-deck', format, deck});
+  }
+
+  lookupRoom(code: string): Promise<RoomInfo> { return this.request({type: 'lookup-room', code}); }
 
   connect(url = FORGE_URL, timeoutMs = 3000): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -159,15 +220,27 @@ export class ForgeClient {
       const timer = setTimeout(() => { ws.close(); reject(new Error('tempo esgotado')); }, timeoutMs);
       ws.onopen = () => { clearTimeout(timer); this.ws = ws; resolve(); };
       ws.onerror = () => { clearTimeout(timer); reject(new Error('conexão recusada')); };
-      ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.onClose(); } };
+      ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.rejectPending('A conexão foi interrompida.'); this.onClose(); } };
       ws.onmessage = ev => {
         let msg: any;
         try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.requestId && this.pending.has(msg.requestId)) {
+          const request = this.pending.get(msg.requestId)!;
+          if (['validation', 'room-info', 'request-error', 'error'].includes(msg.type)) {
+            clearTimeout(request.timer); this.pending.delete(msg.requestId);
+            if (msg.type === 'validation') request.resolve(msg.validation);
+            else if (msg.type === 'room-info') request.resolve(msg.room);
+            else request.reject(new Error(msg.text ?? 'Não foi possível concluir a solicitação.'));
+            return;
+          }
+        }
         if (msg.type === 'state') {
           this.state = msg;
           if (msg.room) this.room = msg.room;
           this.onState(msg);
         } else if (msg.type === 'room') { this.room = msg.room; this.onRoom(msg.room); }
+        else if (msg.type === 'validation-error') this.onValidation(msg.validation, msg.target);
+        else if (msg.type === 'hello') this.onHello(msg);
         else if (msg.type === 'toast') this.onNotice(msg.text, false);
         else if (msg.type === 'error') this.onNotice(msg.text, true);
         else if (msg.type === 'gone') this.onGone(msg.text);
@@ -185,6 +258,7 @@ export class ForgeClient {
   close() {
     const ws = this.ws;
     this.ws = null;
+    this.rejectPending('A conexão foi encerrada.');
     ws?.close();
   }
 }

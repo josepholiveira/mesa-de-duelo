@@ -265,7 +265,7 @@ final class StateJson {
     }
 
     /** Alvos de um item da pilha, somando as sub-habilidades (ex.: "destrua X e compre um card" com dois alvos). */
-    private static JsonObject stackTargets(StackItemView si) {
+    static JsonObject stackTargets(StackItemView si) {
         List<Object> all = new java.util.ArrayList<>();
         for (StackItemView step = si; step != null; step = step.getSubInstance()) {
             if (step.getTargetCards() != null) all.addAll(step.getTargetCards());

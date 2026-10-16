@@ -1,10 +1,11 @@
 import './style.css';
-import { DEFAULT_DECKS, type DeckData } from './decks';
+import { type DeckData } from './decks';
 import { mountDeckBuilder } from './ui/deckbuilder';
-import { ForgeClient, FORGE_URL, type FState } from './forge/client';
+import { ForgeClient, FORGE_URL, type FState, type MatchConfig, type ClientMessage } from './forge/client';
 import { createForgeTableView } from './ui/forgeTable';
 import { deckArt, mountLobby } from './ui/lobby';
 import { enterLandscape, mountRotateGate } from './ui/landscape';
+import { hideCardPreview } from './ui/cardInspector';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -16,6 +17,7 @@ app.innerHTML = `
 
 const screens = { lobby: '#scrLobby', game: '#scrGame', decks: '#scrDecks' } as const;
 function show(name: keyof typeof screens) {
+  hideCardPreview(true);
   screen = name;
   for (const [k, sel] of Object.entries(screens)) (document.querySelector(sel) as HTMLElement).hidden = k !== name;
   document.body.dataset.screen = name;
@@ -23,14 +25,24 @@ function show(name: keyof typeof screens) {
 
 let forge: ForgeClient | null = null;
 let forgeUrl = '';
-let lastMatch: [DeckData, DeckData] | null = null;
+let lastMatch: [DeckData, DeckData | null, MatchConfig] | null = null;
+let connecting: Promise<ForgeClient | null> | null = null;
+let connectingUrl = '';
+let connectionAttempt = 0;
+let pendingStart: { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> } | null = null;
+function finishStart(error?: string) {
+  if (!pendingStart) return;
+  clearTimeout(pendingStart.timer);
+  if (error) pendingStart.reject(new Error(error)); else pendingStart.resolve();
+  pendingStart = null;
+}
 let screen: keyof typeof screens = 'lobby';
 
 /**
  * Partida no Forge em andamento (ou sala esperando o oponente): o que é preciso para redesenhar a mesa
  * e voltar ao mesmo assento se a conexão cair. code/token chegam da ponte em state.session.
  */
-interface ForgeMatch { url: string; deck: DeckData; opp?: DeckData; net: boolean; code?: string; token?: string }
+interface ForgeMatch { url: string; deck: DeckData; opp?: DeckData; net: boolean; config?: MatchConfig; code?: string; token?: string }
 let current: ForgeMatch | null = null;
 
 /** Guardada no localStorage para voltar à partida mesmo depois de recarregar a página ou fechar a aba. */
@@ -67,20 +79,30 @@ const forgeTable = createForgeTableView(document.querySelector('#scrGame')!, {
 mountRotateGate();
 
 const lobby = mountLobby(document.querySelector('#scrLobby')!, {
-  // Começar uma partida é o toque que permite tela cheia e trava em paisagem no celular.
-  onPlay: (you, opp) => { void enterLandscape(); void startMatch(you, opp); },
-  onHost: (you, name, url) => { void enterLandscape(); void startNetMatch(you, url, { type: 'host', name, deck: forgeDeck(you) }); },
-  onJoin: (you, name, code, url) => { void enterLandscape(); void startNetMatch(you, url, { type: 'join', code, name, deck: forgeDeck(you) }); },
+  onPlay: async (you, opp, config) => { void enterLandscape(); await startMatch(you, opp, config); },
+  onHost: async (you, name, url, config) => { void enterLandscape(); await startNetMatch(you, url, { type: 'host', name, deck: forgeDeck(you), config }, config); },
+  onJoin: async (you, name, code, url) => { void enterLandscape(); await startNetMatch(you, url, { type: 'join', code, name, deck: forgeDeck(you) }); },
+  onValidate: async (deck, format, url) => (await requireForge(url)).validateDeck(forgeDeck(deck), format),
+  onLookup: async (code, url) => (await requireForge(url)).lookupRoom(code),
   onCancelRoom: () => { leaveForge(); lobby.setStatus(''); },
-  onDecks: () => show('decks'),
+  onDecks: (action = 'library', format) => { builder.open({action, format}); show('decks'); },
 });
 
-mountDeckBuilder(document.querySelector('#scrDecks')!, {
+const builder = mountDeckBuilder(document.querySelector('#scrDecks')!, {
   onBack: () => { lobby.refresh(); show('lobby'); },
   onChange: () => lobby.refresh(),
+  validateDeck: async (deck, format) => {
+    const result = await (await requireForge(FORGE_URL)).validateDeck(forgeDeck(deck), format);
+    return {...result, issues: result.issues.map(issue => ({...issue, section: issue.section === 'main' || issue.section === 'sideboard' ? issue.section : undefined}))};
+  },
 });
 
-const forgeDeck = (d: DeckData) => ({ name: d.name, cards: d.cards });
+const forgeDeck = (d: DeckData) => ({ name: d.name, cards: d.cards, sideboard: d.sideboard ?? [] });
+async function requireForge(url: string): Promise<ForgeClient> {
+  const client = await connectForge(url, null);
+  if (!client) throw new Error('Não foi possível conectar ao servidor de jogo. Confira a conexão e tente novamente.');
+  return client;
+}
 
 /**
  * Conecta à ponte (reaproveitando a conexão aberta com o mesmo endereço) e liga os eventos à mesa.
@@ -88,6 +110,14 @@ const forgeDeck = (d: DeckData) => ({ name: d.name, cards: d.cards });
  */
 async function connectForge(url: string, hint: string | null): Promise<ForgeClient | null> {
   if (forge?.connected && forgeUrl === url) return forge;
+  if (connecting && connectingUrl === url) return connecting;
+  connectingUrl = url;
+  connecting = openForge(url, hint, ++connectionAttempt);
+  const attempt = connecting;
+  try { return await attempt; } finally { if (connecting === attempt) connecting = null; }
+}
+
+async function openForge(url: string, hint: string | null, attempt: number): Promise<ForgeClient | null> {
   forge?.close();
   forge = null;
   if (hint !== null) lobby.setStatus('Conectando à ponte do Forge…');
@@ -95,32 +125,47 @@ async function connectForge(url: string, hint: string | null): Promise<ForgeClie
   try {
     await client.connect(url);
   } catch {
-    if (hint !== null) {
+    if (hint !== null && attempt === connectionAttempt) {
       lobby.setStatus(`Não encontrei a ponte do Forge em ${url}. ${hint}`, true);
       show('lobby');
     }
     return null;
   }
+  if (attempt !== connectionAttempt) { client.close(); return null; }
   forge = client;
   forgeUrl = url;
   let prev: FState | null = null;
   client.onState = s => {
+    if (forge !== client) return;
     const m = current;
     if (m && s.session) {
       m.code = s.session.code;
       m.token = s.session.token;
       // Só partidas em andamento ficam guardadas: no fim não há para onde voltar.
-      if (s.gameOver) clearResume(); else saveResume();
+      m.config = s.config ?? m.config;
+      if (s.match?.over ?? s.gameOver) clearResume(); else saveResume();
     }
     // A mesa abre no primeiro estado (sala em rede, volta depois de recarregar) e é zerada quando
     // começa outra partida (revanche ou "Recomeçar").
-    const fresh = prev && ((prev.gameOver && !s.gameOver) || s.turn < prev.turn);
+    const fresh = prev && (prev.matchId !== s.matchId || prev.match?.gameNumber !== s.match?.gameNumber || (!s.match && ((prev.gameOver && !s.gameOver) || s.turn < prev.turn)));
     if (m && (screen !== 'game' || fresh)) enterForgeTable(client, m);
     prev = s;
+    finishStart();
     forgeTable.render();
   };
-  client.onRoom = r => { if (current?.net && !r.started) { lobby.showRoom(r.code); lobby.setStatus(''); } };
+  client.onRoom = r => {
+    if (current?.net && !r.started) {
+      current.code = r.code; current.token = r.token; current.config = r.config;
+      saveResume(); lobby.showRoom(r.code); lobby.setStatus(''); finishStart();
+    }
+  };
+  client.onValidation = (validation, target) => {
+    const message = `${target === 'opponent' ? 'Deck do computador: ' : ''}${validation.issues.map(issue => `${issue.card ? `${issue.card}: ` : ''}${issue.message}`).join(' ')}`;
+    if (screen === 'game') forgeTable.notice(message, true);
+    else { lobby.setStatus(message, true); finishStart(message); current = null; }
+  };
   client.onNotice = (text, error) => {
+    if (error) finishStart(text);
     if (screen === 'game') forgeTable.notice(text, error);
     else lobby.setStatus(text, error);
     // Sala fechada ou código errado antes de a partida começar: volta ao formulário.
@@ -138,6 +183,7 @@ async function connectForge(url: string, hint: string | null): Promise<ForgeClie
   };
   client.onClose = () => {
     if (forge !== client) return;
+    finishStart('A conexão com o servidor foi interrompida.');
     if (current?.token && client.replaced) forgeTable.disconnected('A partida foi aberta em outra janela. Reconecte para trazê-la de volta para cá.');
     else if (current?.token) void autoReconnect();
     else if (screen === 'game') forgeTable.disconnected();
@@ -153,30 +199,35 @@ function enterForgeTable(client: ForgeClient, m: ForgeMatch) {
   show('game');
 }
 
-/** Partida contra a IA: o navegador só desenha e manda cliques; as regras rodam no Forge, na ponte em Java. */
-async function startMatch(you: DeckData, opp: DeckData) {
-  lastMatch = [you, opp];
-  leaveForge();
-  const client = await connectForge(FORGE_URL, 'Rode "npm run forge" em outro terminal e tente de novo.');
-  if (!client) return;
-  current = { url: FORGE_URL, deck: you, opp, net: false };
-  enterForgeTable(client, current);
-  client.send({ type: 'start', you: forgeDeck(you), opponent: forgeDeck(opp) });
+/** The server validates before replacing a session. Keep setup visible until acceptance. */
+async function requestMatch(client: ForgeClient, match: ForgeMatch, message: ClientMessage) {
+  finishStart('Uma nova solicitação substituiu a anterior.');
+  current = match;
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (current === match) { client.send({type: 'leave'}); current = null; clearResume(); lobby.showRoom(null); }
+      finishStart('O servidor demorou para iniciar a partida. Tente novamente.');
+    }, 20000);
+    pendingStart = {resolve, reject, timer};
+    client.send(message);
+  });
 }
-
-/** Cria ou entra numa sala em rede. A mesa só abre quando a ponte começar a partida. */
-async function startNetMatch(you: DeckData, url: string, msg: Parameters<ForgeClient['send']>[0]) {
-  leaveForge();
-  const client = await connectForge(url, 'Confira o endereço e se a ponte foi aberta com "npm run forge:rede".');
-  if (!client) return;
-  current = { url, deck: you, net: true };
-  lobby.setStatus(msg.type === 'host' ? 'Criando a sala…' : 'Entrando na sala…');
-  client.send(msg);
+async function startMatch(you: DeckData, opp: DeckData | null, config: MatchConfig) {
+  const client = await requireForge(FORGE_URL);
+  lastMatch = [you, opp, config];
+  lobby.setStatus('Preparando a mesa…');
+  await requestMatch(client, {url: FORGE_URL, deck: you, opp: opp ?? undefined, config, net: false}, {type: 'start', you: forgeDeck(you), opponent: opp ? forgeDeck(opp) : null, config});
+}
+async function startNetMatch(you: DeckData, url: string, message: ClientMessage, config?: MatchConfig) {
+  const client = await requireForge(url);
+  lobby.setStatus(message.type === 'host' ? 'Criando a sala…' : 'Entrando na sala…');
+  await requestMatch(client, {url, deck: you, config, net: true}, message);
 }
 
 /** Abandona a partida do Forge em andamento (ou a sala esperando oponente), se houver. */
 function leaveForge() {
   if (!current) return;
+  finishStart('A solicitação foi cancelada.');
   forge?.send({ type: 'leave' });
   current = null;
   clearResume();
@@ -228,12 +279,7 @@ async function resumeSaved(saved: ForgeMatch) {
 
 show('lobby');
 
-// Atalho: abrir com #jogar começa direto uma partida contra a IA com os dois primeiros decks padrão.
-// O atalho sai da URL na hora: senão cada recarga (ou o link passado ao oponente) abriria outra partida contra a IA.
-const shortcut = location.hash === '#jogar';
-if (shortcut) {
-  history.replaceState(null, '', location.pathname + location.search);
-  void startMatch(DEFAULT_DECKS[0], DEFAULT_DECKS[1]);
-}
-const saved = shortcut ? null : loadResume();
+// Old shared links now open setup; no match starts without a format and deck choice.
+if (location.hash === '#jogar') history.replaceState(null, '', location.pathname + location.search);
+const saved = loadResume();
 if (saved) void resumeSaved(saved);

@@ -9,7 +9,9 @@ services:
     restart: unless-stopped
 
   bridge:
-    build: ./forge-bridge
+    build:
+      context: .
+      dockerfile: forge-bridge/Dockerfile
     environment:
       - JAVA_OPTS=${JAVA_OPTS:--Xmx2g}
     expose:

@@ -9,6 +9,7 @@ import forge.gamemodes.match.YieldUpdate;
 import forge.gamemodes.net.IRemote;
 import forge.gamemodes.net.ProtocolGuiGame;
 import forge.interfaces.IGameController;
+import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.trackable.TrackableCollection;
 
 /**
@@ -35,6 +36,10 @@ final class WebGuiGame extends ProtocolGuiGame {
         // não deste método; por isso as paradas são enviadas a ele explicitamente.
         IGameController controller = getGameController(me);
         if (controller == null || getGameView() == null) return;
+        // Per-player defaults: skip only when Forge proves there is no legal non-mana action.
+        // Presentation timing must never create extra priority confirmations.
+        controller.applyYieldUpdate(new YieldUpdate.SetYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, "true"));
+        controller.applyYieldUpdate(new YieldUpdate.SetYieldPref(FPref.YIELD_AUTO_PASS_RESPECTS_INTERRUPTS, "false"));
         for (PlayerView p : getGameView().getPlayers()) {
             for (PhaseType ph : PhaseType.values()) {
                 controller.applyYieldUpdate(new YieldUpdate.SkipPhase(p, ph, isUiSetToSkipPhase(p, ph)));

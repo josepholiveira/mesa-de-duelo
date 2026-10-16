@@ -4,6 +4,13 @@ import { esc, manaHTML, pip, richText } from './cardtext';
 import { colorFromCost, faceHTML } from './face';
 import { createMotion } from './motion';
 import { canFullscreen, toggleFullscreen } from './landscape';
+import { inspectCard, showCardPreview, hideCardPreview } from './cardInspector';
+import { PresentationTimeline, presentationDuration, hasLiveDecision, stateWithFrame, type PresentationEvent, type PresentationFrame } from './presentationTimeline';
+import { createGameAudio } from './audio';
+import { attachHandDrag } from './handDrag';
+import { applyOpeningPresentation, suppressOpeningPreview } from './openingPresentation';
+import type { DeckEntry } from '../decks';
+import './gameplay.css';
 
 /** Fases do Forge agrupadas nas sete etapas mostradas na lateral. */
 const PHASE_GROUP: Record<string, string> = {
@@ -79,13 +86,21 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       <button class="icon-btn fs-btn" data-ui="fullscreen" aria-label="Tela cheia" title="Tela cheia"${canFullscreen() ? '' : ' hidden'}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="fs-enter" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path class="fs-exit" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
       </button>
-      <span class="room-tag" id="fRoomTag" hidden></span>
+      <button class="icon-btn" data-ui="settings" aria-expanded="false" aria-controls="fSettings">Som e ritmo</button>
+      <span class="room-tag" id="fRoomTag" hidden></span><span class="series-score" id="fSeries" hidden></span>
     </div>
     <div class="menu" id="fMenu" hidden>
       <button class="btn" data-ui="rematch" id="fMenuRematch">Recomeçar partida</button>
       <button class="btn" data-ui="exit">Desistir e voltar ao início</button>
     </div>
-    <aside class="log-drawer" id="fLogDrawer" hidden><h2>Registro</h2><ul id="fLog"></ul></aside>
+    <section class="game-settings" id="fSettings" aria-label="Som e ritmo da partida" hidden>
+      <div class="setting-line"><h2>Som e ritmo</h2><button class="icon-btn" data-ui="settings" aria-label="Fechar configurações">Fechar</button></div>
+      <div class="setting-line"><label for="fMute">Efeitos sonoros</label><button class="icon-btn" id="fMute" data-ui="mute" aria-pressed="true">Desligados</button></div>
+      <label for="fVolume">Volume <input id="fVolume" type="range" min="0" max="100" step="5" value="35"></label>
+      <label for="fPace">Ritmo das jogadas <select id="fPace"><option value="normal">Normal</option><option value="fast">Rápido sem resposta</option></select></label>
+      <p>O ritmo afeta a apresentação. Suas respostas ficam disponíveis assim que o jogo permite.</p>
+    </section>
+    <aside class="log-drawer" id="fLogDrawer" hidden><div class="stack-heading"><h2>Histórico da partida</h2><button class="icon-btn" data-ui="log" aria-label="Fechar histórico">Fechar</button></div><ul id="fLog"></ul></aside>
 
     <div class="opp-hand" id="fOppHand"></div>
     <div class="avatar-slot opp" id="fOppAvatar"></div>
@@ -106,16 +121,16 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     <div class="piles me" id="fMePiles"></div>
     <div class="hand" id="fHand"></div>
 
-    <div class="stack-panel" id="fStack" hidden></div>
+    <aside class="stack-panel" id="fStack" aria-label="Mágicas e habilidades na pilha" hidden></aside>
     <svg class="target-arrows" id="fTargets" aria-hidden="true"></svg>
     <nav class="phase-rail" id="fPhases" aria-label="Fases do turno"></nav>
-    <div class="action" id="fAction" aria-live="polite"></div>
-    <div class="preview" id="fPreview" hidden></div>
+    <div class="action" id="fAction"></div><div class="sr-only" id="fAnnouncement" aria-live="polite" aria-atomic="true"></div>
     <div class="banner" id="fBanner" hidden></div>
     <div class="toasts" id="fToasts" aria-live="polite"></div>
     <div class="overlay" id="fQuestion" hidden></div>
     <div class="overlay" id="fOverlay" hidden></div>
     <div class="overlay" id="fZone" hidden></div>
+    <div class="overlay stack-gallery-overlay" id="fStackGallery" hidden></div>
   </div>`;
 
   const $ = (sel: string) => root.querySelector(sel) as HTMLElement;
@@ -126,7 +141,6 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   let zoneKind: 'gy' | 'exile' = 'gy';
   let bannerTimer = 0;
   const motion = createMotion(root);
-  let lastLife = new Map<number, number>();
   let lastDamage = new Map<number, number>();
   let disconnected = false;
   /** Versão do prompt em que o jogador já clicou num botão; evita clique duplo até o Forge responder. */
@@ -140,7 +154,130 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   /** Marcador com o balão aberto por clique (id da carta e tipo), até clicar fora. */
   let openCounter: string | null = null;
   /** Seleção em andamento na pergunta aberta. */
-  let qState: { id: number; picked: number[]; text: string } | null = null;
+  let qState: { id: number; picked: number[]; text: string; amounts: string[] } | null = null;
+  let groupIds: number[] | null = null;
+  let stackGalleryOpen = false;
+  let sideboardDraft: { id: number; main: DeckEntry[]; sideboard: DeckEntry[] } | null = null;
+  let sideboardError = '';
+  let sideboardBusy = false;
+  const timeline = new PresentationTimeline();
+  const audio = createGameAudio();
+  let presentationTimer = 0;
+  let displayFrame: PresentationFrame | null = null;
+  let silentNext = true;
+  let fast = false;
+  let previousAnnouncement = '';
+  let returnFocus: HTMLElement | null = null;
+  let currentModal: HTMLElement | null = null;
+  try { fast = localStorage.getItem('mesa:pace') === 'fast'; } catch { /* Storage is optional. */ }
+  const renderedContent = new WeakMap<HTMLElement, { html: string; first: ChildNode | null }>();
+  const setHTML = (el: HTMLElement, html: string) => {
+    const previous = renderedContent.get(el);
+    if (previous?.html === html && previous.first === el.firstChild) return;
+    el.innerHTML = html; renderedContent.set(el, { html, first: el.firstChild });
+  };
+  const inspectIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg>';
+  const inspectButton = (c: FCard) => !c.faceDown && c.name ? `<button class="inspect-card" data-inspect="${c.id}" aria-label="Inspecionar ${esc(label(c))}">${inspectIcon}</button>` : '';
+
+  function syncSettings() {
+    const settings = audio.settings;
+    const mute = $('#fMute');
+    mute.textContent = settings.muted ? 'Desligados' : 'Ligados';
+    mute.setAttribute('aria-pressed', String(!settings.muted));
+    ($('#fVolume') as HTMLInputElement).value = String(Math.round(settings.volume * 100));
+    ($('#fPace') as HTMLSelectElement).value = fast ? 'fast' : 'normal';
+  }
+  syncSettings();
+  const handDrag = attachHandDrag(root, {
+    state: () => disconnected ? null : client?.state,
+    beforeDrag: () => hideCardPreview(true),
+    play: action => { stopPresentation(); client?.send(action); },
+  });
+
+  function focusSnapshot() {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || !root.contains(el)) return null;
+    const keys = ['data-ui', 'data-act', 'data-inspect', 'data-fid', 'data-pid', 'data-mana', 'data-ctr', 'data-event', 'data-stack', 'data-stack-inspect', 'data-peek', 'data-q-opt', 'data-q-confirm', 'data-q-submit', 'data-q-none', 'data-q-keep', 'data-q-amount', 'data-group', 'data-sb-main', 'data-sb-side'];
+    const attr = keys.find(key => el.hasAttribute(key));
+    const scope = el.parentElement?.closest('[id]')?.id;
+    const selector = el.id ? `#${CSS.escape(el.id)}` : attr ? `${scope ? `#${CSS.escape(scope)} ` : ''}[${attr}="${CSS.escape(el.getAttribute(attr)!)}"]` : null;
+    return selector ? { selector, start: el instanceof HTMLInputElement ? el.selectionStart : null, end: el instanceof HTMLInputElement ? el.selectionEnd : null } : null;
+  }
+  function restoreFocus(saved: ReturnType<typeof focusSnapshot>) {
+    if (!saved || (document.activeElement !== document.body && document.activeElement?.isConnected)) return;
+    const next = root.querySelector<HTMLElement>(saved.selector);
+    if (!next || next.closest('[hidden]') || (next as HTMLButtonElement).disabled) return;
+    next.focus({ preventScroll: true });
+    if (next instanceof HTMLInputElement && saved.start !== null && saved.end !== null && next.type !== 'number') next.setSelectionRange(saved.start, saved.end);
+  }
+  function syncModal() {
+    const active = ['#fOverlay', '#fQuestion', '#fZone', '#fStackGallery'].map(id => $(id)).find(el => !el.hidden) ?? null;
+    const previousModal = currentModal;
+    if (active !== currentModal) {
+      if (!currentModal && active) returnFocus = document.activeElement as HTMLElement | null;
+      currentModal = active;
+    }
+    root.querySelectorAll<HTMLElement>('.arena > *').forEach(el => { el.inert = !!active && el !== active; });
+    if (!active && previousModal && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    if (active && !active.contains(document.activeElement) && !document.querySelector('dialog[open]')) {
+      active.querySelector<HTMLElement>('button:not(:disabled), input, [tabindex="0"]')?.focus({ preventScroll: true });
+    }
+  }
+  function closeZone() { zoneOf = null; groupIds = null; $('#fZone').hidden = true; syncModal(); }
+  function closeStackGallery() {
+    stackGalleryOpen = false; $('#fStackGallery').hidden = true;
+    root.querySelector('[data-ui="stack-open"]')?.setAttribute('aria-expanded', 'false');
+    hideCardPreview(true); syncModal();
+    const restore = () => {
+      if (!currentModal && !stackGalleryOpen) (root.querySelector<HTMLElement>('[data-ui="stack-open"]') ?? root.querySelector<HTMLElement>('#fAction button:not(:disabled)') ?? root.querySelector<HTMLElement>('[data-ui="menu"]'))?.focus({ preventScroll: true });
+    };
+    restore();
+    // A live update may replace the priority controls later in this same render.
+    queueMicrotask(() => { if (document.activeElement === document.body) restore(); });
+  }
+  function announce(message: string) {
+    if (message === previousAnnouncement) return;
+    previousAnnouncement = message;
+    $('#fAnnouncement').textContent = message;
+  }
+  function renderedInputIsCurrent(el: HTMLElement) {
+    const gen = el.closest<HTMLElement>('[data-gen]')?.dataset.gen;
+    return !!client?.state && gen !== undefined && Number(gen) === client.state.input.gen && !disconnected;
+  }
+
+  function advancePresentation() {
+    clearTimeout(presentationTimer);
+    if (document.hidden || root.hidden || disconnected) { stopPresentation(); return; }
+    let entry = timeline.advance();
+    const s = client?.state;
+    while (entry?.audioOnly) {
+      if (s) audio.play(entry.event, timeline.matchId, entry.audible, s.you);
+      entry = timeline.advance();
+    }
+    displayFrame = s && !hasLiveDecision(s) ? entry?.event.frame ?? null : null;
+    renderTable(false);
+    if (!entry || !s) return;
+    const duration = presentationDuration(entry.event, fast || hasLiveDecision(s));
+    motion.present(entry.event, { you: s.you, html: entry.event.card ? face(entry.event.card, 'normal') : undefined,
+      label: eventDescription(entry.event), duration, hideDestination: !hasLiveDecision(s) });
+    audio.play(entry.event, timeline.matchId, entry.audible, s.you);
+    if (entry.event.type === 'damage' && entry.event.targets?.players?.length) announce(eventDescription(entry.event));
+    else if (!hasLiveDecision(s)) announce(eventDescription(entry.event));
+    presentationTimer = window.setTimeout(advancePresentation, duration);
+  }
+  function stopPresentation() {
+    clearTimeout(presentationTimer); timeline.catchUp(); displayFrame = null;
+    motion.cancelPresentation(); audio.silence();
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { stopPresentation(); silentNext = true; }
+    else if (!root.hidden) render();
+  });
+  root.querySelectorAll<HTMLElement>('.row').forEach(row => {
+    row.tabIndex = 0;
+    row.setAttribute('aria-label', `${row.closest('.opp') ? 'Campo do oponente' : 'Seu campo'}: ${row.classList.contains('lands') ? 'terrenos e outros permanentes' : 'criaturas'}. Role para ver todas as cartas.`);
+    row.addEventListener('scroll', () => { if (client?.state) { const visual = stateWithFrame(client.state, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); } }, { passive: true });
+  });
 
   // ---------- Imagens do Scryfall, buscadas por nome ----------
   const wanted = new Set<string>();
@@ -188,11 +325,11 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return s.input.selectable.includes(id) || !!s.input.actionable?.includes(id);
   }
   /** Cemitério e exílio: além do que o Forge marca, o que a ponte diz que dá para usar agora (flashback, tramadas...). */
-  const canUse = (s: FState, c: FCard) => usable(s, c.id) || (!s.question && !!s.castable?.includes(c.id));
+  const canUse = (s: FState, c: FCard) => usable(s, c.id) || (!s.question && !!s.input.priority && s.input.ok.enabled && !!s.castable?.includes(c.id));
 
   /** Cartas de fora da mão que dá para usar agora, com a etiqueta de onde vêm; aparecem na ponta da mão. */
   function outsideHand(s: FState) {
-    if (s.question || !s.castable?.length) return [];
+    if (s.question || !s.input.priority || !s.input.ok.enabled || !s.castable?.length) return [];
     const out: { c: FCard; tag: string }[] = [];
     for (const p of s.players) {
       const mine = p.id === s.you;
@@ -259,8 +396,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       for (const id of t.cards ?? []) { const to = targetRect('c', id); if (to) links.push({ from, to, cls }); }
       for (const id of t.players ?? []) { const to = targetRect('p', id); if (to) links.push({ from, to, cls }); }
     };
-    s.stack.forEach((si, i) => {
-      const from = q(`#fStack li:nth-child(${i + 1}) .stack-card`) ?? (si.source ? q(`.field [data-fid="${si.source.id}"]`) : undefined);
+    s.stack.forEach(si => {
+      const from = q(`#fStack [data-stack="${si.id}"]`) ?? (si.source ? q(`.field [data-fid="${si.source.id}"]`) : undefined);
       add(from, si.targets, si.controller === s.you ? 'mine' : 'theirs');
     });
     const tg = s.input.targeting;
@@ -287,9 +424,33 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (svg.dataset.html !== html) { svg.innerHTML = html; svg.dataset.html = html; }
   }
 
+  function layoutStack() {
+    const arena = root.querySelector<HTMLElement>('.arena')!;
+    const panel = $('#fStack');
+    arena.classList.remove('stack-tight');
+    arena.style.removeProperty('--stack-active-width');
+    for (const property of ['--stack-width', 'top', 'transform']) panel.style.removeProperty(property);
+    if (panel.hidden) return;
+    const pile = panel.querySelector<HTMLElement>('.stack-pile');
+    if (!pile) return;
+    const action = $('#fAction').getBoundingClientRect();
+    const natural = panel.getBoundingClientRect();
+    if (natural.bottom + 12 <= action.top) return;
+    const arenaBox = arena.getBoundingClientRect();
+    const phases = $('#fPhases').getBoundingClientRect();
+    const topSafe = phases.height ? phases.bottom - arenaBox.top + 12 : 60;
+    const available = Math.max(70, action.top - arenaBox.top - topSafe - 18);
+    const width = Math.min(pile.getBoundingClientRect().width, available * 488 / 680);
+    arena.classList.add('stack-tight');
+    arena.style.setProperty('--stack-active-width', `${width}px`);
+    panel.style.setProperty('--stack-width', `${width}px`);
+    panel.style.top = `${action.top - arenaBox.top - width * 680 / 488 - 18}px`;
+    panel.style.transform = 'none';
+  }
+
   window.addEventListener('resize', () => {
     const s = client?.state;
-    if (s?.type === 'state' && !root.hidden) { drawBlockArrows(s); drawTargetArrows(s); }
+    if (s?.type === 'state' && !root.hidden) { layoutStack(); const visual = stateWithFrame(s, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); }
   });
 
   const COUNTER_LABEL: Record<string, string> = { P1P1: '+1/+1', M1M1: '-1/-1', LOYALTY: 'Lealdade', SHIELD: 'Escudo', STUN: 'Atordoar' };
@@ -298,8 +459,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   /** Palavras-chave que viram marcador na carta do campo. */
   const KEYWORD_LABEL: Record<string, string> = {
     FLYING: 'Voar', REACH: 'Alcance', TRAMPLE: 'Atropelar', MENACE: 'Ameaçar', FIRST_STRIKE: 'Iniciativa',
-    DOUBLE_STRIKE: 'Golpe Duplo', DEATHTOUCH: 'Toque Mortífero', LIFELINK: 'Vínculo com a Vida', VIGILANCE: 'Vigilância',
-    HASTE: 'Ímpeto', DEFENDER: 'Defensor', HEXPROOF: 'Resistência a Magia', SHROUD: 'Manto', WARD: 'Proteção contra Alvos',
+    DOUBLE_STRIKE: 'Golpe duplo', DEATHTOUCH: 'Toque mortífero', LIFELINK: 'Vínculo com a vida', VIGILANCE: 'Vigilância',
+    HASTE: 'Ímpeto', DEFENDER: 'Defensor', HEXPROOF: 'Resistência à magia', SHROUD: 'Manto', WARD: 'Proteção contra alvos',
     INDESTRUCTIBLE: 'Indestrutível', PROTECTION: 'Proteção',
   };
   const keywordsOf = (c: FCard) => (c.keywords ?? []).filter(k => KEYWORD_LABEL[k]);
@@ -331,6 +492,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const ci = combatIndex(s, c.id);
     const byId = battlefieldById(s);
     const slot = ['slot'];
+    if (c.creature && c.keywords?.includes('FLYING')) slot.push('has-flying');
     if (c.tapped) slot.push('tapped');
     if (c.attacking || ci.attack) slot.push('attacking');
     if (c.blocking || ci.block) slot.push('blocking');
@@ -364,7 +526,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       `<div class="att${usable(s, a.id) ? ' actionable' : ''}" data-fid="${a.id}" role="button" tabindex="0" style="--i:${i + 1}" aria-label="${esc(label(a))}, presa a ${esc(label(c))}">${face(a, 'small')}</div>`).join('');
     const style = attached.length ? ` style="--atts:${attached.length}"` : '';
     if (attached.length) slot.push('has-att');
-    return `<div class="${slot.join(' ')}"${style}>${atts}<div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(aria)}">${face(c, 'small')}${badges}${tag}${kwHTML}${pt}${counters}</div></div>`;
+    return `<div class="${slot.join(' ')}"${style}>${atts}<div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(aria)}">${face(c, 'small')}${badges}${tag}${kwHTML}${pt}${counters}</div>${inspectButton(c)}</div>`;
   }
 
   /** Cartas de uma fileira, sem as auras/equipamentos (que vão desenhados junto da carta a que estão presos). */
@@ -395,7 +557,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       groups.set(k, [...(groups.get(k) ?? []), c]);
     }
     return [...groups.values()].map(cs => `<div class="stack" style="--n:${cs.length}">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}${
-      cs.length > 1 ? `<span class="stack-n" aria-hidden="true">×${cs.length}</span>` : ''}</div>`).join('');
+      cs.length > 1 ? `<button class="stack-n" data-group="${cs.map(c => c.id).join(',')}" aria-label="Ver ${cs.length} cópias de ${esc(label(cs[0]))}">×${cs.length}</button>` : ''}</div>`).join('');
   }
 
   function backRow(s: FState, p: FPlayer) {
@@ -409,7 +571,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function avatar(s: FState, p: FPlayer, idx: number) {
     const cls = ['avatar', idx === 0 ? 'me' : 'opp'];
     if (s.activePlayer === p.id && !s.gameOver) cls.push('active');
-    if (p.life < (lastLife.get(p.id) ?? p.life)) cls.push('hit');
+    if (s.input.selectablePlayers?.includes(p.id)) cls.push('selectable-player');
     // Pagando um custo: cada símbolo da sua reserva vira um botão que gasta aquela mana.
     const spend = p.id === s.you && !!s.input.paying;
     const pool = Object.entries(p.pool).flatMap(([c, n]) => Array(n).fill(spend
@@ -450,48 +612,175 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function zoneView(s: FState) {
     const el = $('#fZone');
     const p = s.players.find(pl => pl.id === zoneOf);
-    if (!p) { el.hidden = true; zoneOf = null; return; }
-    const title = zoneKind === 'exile' ? 'Exílio' : 'Cemitério';
-    const cards = [...(zoneKind === 'exile' ? p.exile : p.graveyard)].reverse();
-    // Carta que dá para usar agora (conjurar uma tramada, flashback...) fica clicável e com o brilho azul.
-    const card = (c: FCard) => canUse(s, c)
-      ? `<div class="q-face actionable" data-fid="${c.id}" role="button" tabindex="0" aria-label="Usar ${esc(label(c))}">${face(c, 'normal')}</div>`
-      : `<div class="q-face" data-peek="${c.id}">${face(c, 'normal')}${c.plotted ? '<div class="zone-tag">Tramada</div>' : ''}</div>`;
-    el.innerHTML = `<div class="question zone-view" role="dialog" aria-modal="true" aria-label="${title}">
-      <h2>${title} · ${esc(p.name)} (${cards.length})</h2>
+    if (!p && !groupIds) { closeZone(); return; }
+    const title = groupIds ? 'Cartas do grupo' : zoneKind === 'exile' ? 'Exílio' : 'Cemitério';
+    const cards = groupIds ? groupIds.map(id => findCard(id)).filter((c): c is FCard => !!c) : [...(zoneKind === 'exile' ? p!.exile : p!.graveyard)].reverse();
+    const card = (c: FCard) => `<div class="zone-card">${canUse(s, c)
+      ? `<div class="q-face actionable" data-fid="${c.id}" data-gen="${s.input.gen}" role="button" tabindex="0" aria-label="Usar ${esc(label(c))}">${face(c, 'normal')}</div>`
+      : `<button class="q-face" data-peek="${c.id}" aria-label="Inspecionar ${esc(label(c))}">${face(c, 'normal')}${c.plotted ? '<div class="zone-tag">Tramada</div>' : ''}</button>`}
+      <button class="icon-btn" data-inspect="${c.id}">Inspecionar</button></div>`;
+    setHTML(el, `<div class="question zone-view" role="dialog" aria-modal="true" aria-label="${title}">
+      <h2>${title}${p ? ` · ${esc(p.name)}` : ''} (${cards.length})</h2>
       ${cards.length ? `<div class="q-opts cards">${cards.map(card).join('')}</div>` : '<p class="q-hint">Vazio.</p>'}
       <div class="q-actions"><button class="arena-btn secondary" data-ui="zone-close">Fechar</button></div>
-    </div>`;
+    </div>`);
     el.hidden = false;
+    syncModal();
   }
 
+  function eventDescription(event: PresentationEvent) {
+    const who = client?.state?.players.find(p => p.id === event.actor)?.name ?? 'Jogador';
+    const name = event.card?.name ? label(event.card) : 'uma carta';
+    switch (event.type) {
+      case 'land-played': return `${who} jogou ${name}.`;
+      case 'spell-cast': return `${who} conjurou ${name}.`;
+      case 'ability-activated': return `${who} ativou uma habilidade${event.card?.name ? ` de ${name}` : ''}.`;
+      case 'resolved': return `Resolução: ${event.card?.name ? name : 'efeito'}.`;
+      case 'countered': return `Anulado: ${event.card?.name ? name : 'efeito'}.`;
+      case 'entered': return `${name} entrou no campo.`;
+      case 'left': return `${name} saiu do campo.`;
+      case 'attackers': return `${who} declarou atacantes.`;
+      case 'blockers': return `${who} declarou bloqueadores.`;
+      case 'turn': return `Turno de ${who}.`;
+      case 'damage': {
+        const target = (event.targets?.players ?? []).map(id => client?.state?.players.find(p => p.id === id)?.name).filter(Boolean).join(', ');
+        return target ? `${target} sofreu ${Math.abs(event.delta ?? 0)} de dano.` : `${Math.abs(event.delta ?? 0)} de dano causado.`;
+      }
+      case 'life-changed': return `${who}: ${event.delta && event.delta > 0 ? '+' : ''}${event.delta ?? 0} de vida.`;
+      default: return event.text ?? 'O jogo avançou.';
+    }
+  }
+  function targetsDescription(targets: PresentationEvent['targets']) {
+    if (!targets) return '';
+    const names = [...(targets.cards ?? []).map(id => findCard(id)).filter((c): c is FCard => !!c).map(label),
+      ...(targets.players ?? []).map(id => client?.state?.players.find(p => p.id === id)?.name).filter(Boolean)];
+    return names.length ? `Alvo${names.length > 1 ? 's' : ''}: ${names.join(', ')}` : '';
+  }
+  function stackFace(si: FState['stack'][number]) {
+    return si.source ? face(si.source, 'normal') : `<div class="stack-effect-face"><span>Efeito na pilha</span><p>${richText(si.text)}</p></div>`;
+  }
   function stackPanel(s: FState) {
-    if (!s.stack.length) return '';
-    return `<h2>Pilha</h2><ol>${s.stack.map(si => `
-      <li class="${si.controller === s.you ? 'mine' : 'theirs'}">
-        ${si.source ? `<div class="stack-card" data-peek="${si.source.id}">${face(si.source, 'small')}</div>` : ''}
-        <p>${richText(si.text)}</p>
-      </li>`).join('')}</ol>`;
+    const count = s.stack.length;
+    const top = s.stack[0];
+    if (!top) return '';
+    return `<div class="stack-heading"><h2>Pilha</h2><span class="stack-count">${count}</span></div>
+      <button class="stack-pile" data-ui="stack-open" data-stack="${top.id}" data-gen="${s.input.gen}" aria-haspopup="dialog" aria-expanded="${stackGalleryOpen}" aria-controls="fStackGallery" aria-label="Abrir a pilha: ${count} ${count === 1 ? 'efeito' : 'efeitos'}. ${top.source ? esc(label(top.source)) : 'O efeito do topo'} resolve primeiro.">
+        ${s.stack.slice(0, 4).map((si, i) => `<div class="stack-layer ${si.controller === s.you ? 'mine' : 'theirs'}${s.input.selectableStacks?.includes(si.id) ? ' actionable' : ''}" style="--depth:${i}" ${i ? `data-stack="${si.id}"` : ''} aria-hidden="true">${stackFace(si)}</div>`).join('')}
+        <span class="stack-top-label">Resolve primeiro</span>
+      </button><span class="stack-open-hint">Clique para ver a pilha</span>`;
+  }
+  function renderStackGallery(s: FState) {
+    if (!stackGalleryOpen) return;
+    const boardDecision = !s.input.selectableStacks?.length && (!!s.input.paying || !!s.input.targeting || !!s.input.selectablePlayers?.length || !!s.input.selectable.length || (!s.input.priority && (s.input.ok.enabled || s.input.cancel.enabled)));
+    if (!s.stack.length || s.question || s.gameOver || s.sideboarding || boardDecision) { closeStackGallery(); return; }
+    const gallery = $('#fStackGallery');
+    const track = gallery.querySelector<HTMLElement>('.stack-gallery-track');
+    const scroll = { left: track?.scrollLeft ?? 0, top: track?.scrollTop ?? 0 };
+    const count = s.stack.length;
+    setHTML(gallery, `<section class="stack-gallery" role="dialog" aria-modal="true" aria-labelledby="fStackGalleryTitle" aria-describedby="fStackGalleryHint">
+      <header class="stack-gallery-heading"><div><h2 id="fStackGalleryTitle">Pilha <span aria-live="polite">${count}</span></h2><p id="fStackGalleryHint">O primeiro efeito à esquerda resolve primeiro.</p></div><button class="icon-btn" data-ui="stack-close" aria-label="Fechar pilha">Fechar</button></header>
+      <ol class="stack-gallery-track" tabindex="0" aria-label="Efeitos em ordem de resolução. Role para ver todos.">${s.stack.map((si, i) => {
+        const selectable = !!s.input.selectableStacks?.includes(si.id);
+        const name = si.source ? label(si.source) : 'Efeito';
+        return `<li class="stack-gallery-item ${si.controller === s.you ? 'mine' : 'theirs'}" data-stack-instance="${si.id}">
+          <div class="stack-gallery-order"><b>${i + 1}</b><span>${i === 0 ? 'Resolve primeiro' : `${i + 1}º na resolução`}</span></div>
+          <button class="stack-gallery-card${selectable ? ' actionable' : ''}" data-stack="${si.id}" data-gen="${s.input.gen}" aria-label="${selectable ? 'Selecionar como alvo' : 'Inspecionar'}: ${esc(name)}">${stackFace(si)}</button>
+          <div class="stack-gallery-owner">${esc(s.players.find(p => p.id === si.controller)?.name ?? 'Efeito')}</div>
+          <div class="stack-gallery-effect" tabindex="0" aria-label="Efeito e alvos de ${esc(name)}"><p>${richText(si.text)}</p>${targetsDescription(si.targets) ? `<p class="stack-targets">${esc(targetsDescription(si.targets))}</p>` : ''}</div>
+          <div class="stack-gallery-actions">${selectable ? `<button class="arena-btn primary" data-stack="${si.id}" data-gen="${s.input.gen}">Selecionar como alvo</button>` : ''}${si.source ? `<button class="icon-btn" data-stack-inspect="${si.id}" aria-label="Inspecionar ${esc(name)}">Inspecionar</button>` : ''}</div>
+        </li>`;
+      }).join('')}</ol>
+      <p class="stack-gallery-help">Use ← e → nas cartas para percorrer a pilha. Esc fecha.</p>
+    </section>`);
+    gallery.hidden = false;
+    const next = gallery.querySelector<HTMLElement>('.stack-gallery-track')!;
+    next.scrollLeft = scroll.left; next.scrollTop = scroll.top;
+  }
+  function renderActivity() {
+    const authoritative = client?.state;
+    if (!authoritative) return;
+    const s = stateWithFrame(authoritative, displayFrame);
+    const el = $('#fStack');
+    const focused = focusSnapshot();
+    const scrollTop = el.scrollTop;
+    el.hidden = !s.stack.length;
+    root.querySelector('.forge')!.classList.toggle('has-stack', !!s.stack.length);
+    setHTML(el, s.stack.length ? stackPanel(s) : '');
+    el.scrollTop = scrollTop;
+    renderStackGallery(authoritative);
+    // Optional drawer only: ordinary draws and priority changes never crowd the table.
+    setHTML($('#fLog'), timeline.history.slice().reverse().map(event => `<li>${event.card?.name && !event.card.faceDown
+      ? `<button class="history-inspect" data-event="${event.seq}">${esc(eventDescription(event))}</button>`
+      : `<span>${esc(eventDescription(event))}</span>`}</li>`).join('') || '<li>As jogadas aparecerão aqui.</li>');
+    restoreFocus(focused);
+  }
+
+  function sideboardingHTML(s: FState) {
+    const sb = s.sideboarding!;
+    if (!sideboardDraft || sideboardDraft.id !== sb.id) {
+      sideboardDraft = { id: sb.id, main: structuredClone(sb.main), sideboard: structuredClone(sb.sideboard) };
+      sideboardError = ''; sideboardBusy = false;
+    }
+    if (sb.ready) sideboardBusy = false;
+    const draft = sideboardDraft;
+    const count = (entries: DeckEntry[]) => entries.reduce((n, e) => n + e.count, 0);
+    const locked = sb.ready || sideboardBusy;
+    const list = (entries: DeckEntry[], main: boolean) => `<ul class="sideboard-list">${entries.map((entry, i) => `<li><span class="sb-count">${entry.count}×</span><button class="sb-name" data-sb-inspect="${esc(entry.name)}">${esc(ptOf(entry.name)?.name || entry.name)}</button><button class="sb-move" ${main ? 'data-sb-main' : 'data-sb-side'}="${i}" ${locked ? 'disabled' : ''} aria-label="Mover uma cópia de ${esc(entry.name)} para ${main ? 'o sideboard' : 'o deck principal'}">${main ? '→' : '←'}</button></li>`).join('') || '<li>Nenhuma carta.</li>'}</ul>`;
+    const score = s.match ? s.match.wins.join(' × ') : '';
+    return `<div class="sideboard-panel" role="dialog" aria-modal="true" aria-labelledby="fSideboardTitle"><h2 id="fSideboardTitle">Prepare o próximo jogo</h2>
+      <p>Jogo ${s.match?.gameNumber ?? 1} encerrado${score ? ` · Placar: ${score}` : ''}. Troque cartas entre o deck principal e o sideboard.</p>
+      <p>Você só pode usar as cartas que já trouxe para a partida. As trocas precisam manter a lista válida para o formato.</p>
+      ${sideboardError ? `<p class="sideboard-error" role="alert">${esc(sideboardError)}</p>` : ''}
+      <div class="sideboard-columns"><section><h3>Deck principal · ${count(draft.main)}</h3>${list(draft.main, true)}</section><section><h3>Sideboard · ${count(draft.sideboard)}</h3>${list(draft.sideboard, false)}</section></div>
+      <div class="sideboard-actions"><button class="arena-btn secondary" data-ui="exit">Sair da partida</button><button class="arena-btn secondary" data-ui="next-game" ${locked ? 'disabled' : ''}>Continuar sem trocas</button><button class="arena-btn primary" data-ui="sideboard-ready" ${locked ? 'disabled' : ''}>${sb.ready ? 'Aguardando o oponente…' : sideboardBusy ? 'Verificando…' : 'Confirmar e continuar'}</button></div>
+    </div>`;
   }
 
   function buttons(s: FState) {
     if (s.gameOver || s.question) return '';
-    const { ok, cancel } = s.input;
+    const handCount = s.players.find(p => p.id === s.you)?.hand.length ?? 0;
+    const ok = s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
+      : s.input.opening === 'mulligan' ? { ...s.input.ok, label: `Manter ${handCount}` } : s.input.ok;
+    const cancel = s.input.opening === 'play-draw' ? { ...s.input.cancel, label: 'Oponente joga' } : s.input.cancel;
     const waiting = clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS;
     const b = (act: string, btn: { label: string; enabled: boolean }, kind: string) =>
-      btn.label ? `<button class="arena-btn ${kind}" data-act="${act}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
+      btn.label ? `<button class="arena-btn ${kind}" data-act="${act}" data-gen="${s.input.gen}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
     const mine = s.activePlayer === s.you;
-    if (!ok.enabled && !cancel.enabled) return `<button class="arena-btn waiting" disabled>${mine ? 'Aguarde' : 'Oponente'}</button>`;
-    return b('cancel', cancel, 'secondary') + b('ok', ok, 'primary');
+    if (!ok.enabled && !cancel.enabled) return `<button class="arena-btn waiting" disabled>${s.input.opening ? 'Aguardando confirmação…' : mine ? 'Aguardando o jogo…' : 'Oponente jogando…'}</button>`;
+    const endTurn = !!s.input.priority && ok.enabled && mine && !s.stack.length && !s.input.targeting && !s.input.paying;
+    const undo = endTurn && /fim de turno|end turn/i.test(cancel.label) ? '' : b('cancel', cancel, 'secondary');
+    const priority = s.input.priority ? { ...ok, label: 'Passar prioridade' } : ok;
+    return undo + b('ok', priority, endTurn ? 'secondary' : 'primary') +
+      (endTurn ? b('pass-turn', { label: 'Fim de turno', enabled: true }, 'primary') : '');
   }
 
   // ---------- Perguntas ----------
   const optLabel = (o: FOption | string) => (typeof o === 'string' ? o : o.label);
 
+  function amountStatus(q: FQuestion) {
+    const amounts = (q.options ?? []).map((_, i) => Number(qState?.amounts[i]));
+    const validValues = amounts.every((n, i) => {
+      const option = q.options![i];
+      const min = typeof option === 'string' ? 0 : option.min ?? 0;
+      const max = typeof option === 'string' ? q.total ?? 0 : option.max ?? q.total ?? 0;
+      return /^\d+$/.test(qState?.amounts[i] ?? '') && Number.isSafeInteger(n) && n >= min && n <= max;
+    });
+    const remaining = (q.total ?? 0) - amounts.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
+    return { amounts, valid: validValues && remaining === 0, text: !validValues ? 'Respeite os limites indicados para cada alvo.' : remaining < 0 ? `Excesso: ${-remaining}.` : `Restante: ${remaining}.` };
+  }
+
   function questionHTML(q: FQuestion) {
-    if (!qState || qState.id !== q.id) qState = { id: q.id, picked: [], text: q.initial ?? '' };
+    if (!qState || qState.id !== q.id) qState = { id: q.id, picked: [], text: q.initial ?? '', amounts: (q.options ?? []).map(o => String(typeof o === 'string' ? 0 : o.min ?? 0)) };
     const opts = q.options ?? [];
     const head = `<h2>${esc(q.title)}</h2>${q.card ? `<div class="q-card">${face(q.card, 'normal')}</div>` : ''}`;
+    if (q.kind === 'amount') {
+      const status = amountStatus(q);
+      return `${head}<form data-q-amount-form><div class="q-amounts">${opts.map((o, i) => {
+        const min = typeof o === 'string' ? 0 : o.min ?? 0;
+        const max = typeof o === 'string' ? q.total ?? 0 : o.max ?? q.total ?? 0;
+        return `<label><span>${esc(optLabel(o))}<small>De ${min} a ${max}</small></span><input data-q-amount="${i}" type="number" inputmode="numeric" min="${min}" max="${max}" step="1" value="${esc(qState!.amounts[i])}" aria-describedby="fAmountRemaining"></label>`;
+      }).join('')}</div><p class="q-hint" id="fAmountRemaining" aria-live="polite">${status.text}</p><div class="q-actions"><button class="arena-btn primary" data-q-amount-submit ${status.valid ? '' : 'disabled'}>Confirmar distribuição</button></div></form>`;
+    }
     if (q.kind === 'confirm') {
       return `${head}<div class="q-actions">${opts.map((o, i) =>
         `<button class="arena-btn ${i === 0 ? 'primary' : 'secondary'}" data-q-confirm="${i === 0}">${esc(optLabel(o))}</button>`).join('')}</div>`;
@@ -499,7 +788,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (q.kind === 'reveal') {
       const anyCards = opts.some(o => typeof o !== 'string' && o.card);
       return `${head}<div class="q-opts ${anyCards ? 'cards' : ''}">${opts.map(o => typeof o !== 'string' && o.card
-        ? `<div class="q-face" data-peek="${o.card.id}">${face(o.card, 'normal')}</div>`
+        ? `<div class="q-face" data-peek="${o.card.id}" role="button" tabindex="0" aria-label="Inspecionar ${esc(label(o.card))}">${face(o.card, 'normal')}</div>`
         : `<div class="q-opt"><span>${esc(optLabel(o))}</span></div>`).join('')}</div>
         <div class="q-actions"><button class="arena-btn primary" data-q-none>OK</button></div>`;
     }
@@ -532,74 +821,92 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       </div>`;
   }
 
-  function answer(extra: { indices?: number[]; value?: boolean; text?: string }) {
+  function answer(extra: { indices?: number[]; value?: boolean; text?: string; amounts?: number[] }) {
     const q = client?.state?.question;
     if (!q || !client) return;
+    stopPresentation();
     client.send({ type: 'answer', id: q.id, ...extra });
     qState = null;
     $('#fQuestion').hidden = true;
   }
 
   // ---------- Desenho ----------
-  function render() {
+  function render() { renderTable(true); }
+  function renderTable(ingest: boolean) {
     const s = client?.state;
     if (!s || s.type !== 'state') return;
-    const meIdx = Math.max(0, s.players.findIndex(p => p.id === s.you));
-    const me = s.players[meIdx];
-    const opp = s.players[1 - meIdx];
+    const savedFocus = focusSnapshot();
+    const scrollPositions = new Map([...root.querySelectorAll<HTMLElement>('.row, .hand')].map(el => [el.id, el.scrollLeft]));
+    const silently = silentNext || document.hidden;
+    if (ingest) {
+      const beforeCurrent = timeline.current;
+      timeline.ingest(s.matchId ?? s.session?.code ?? 'local', s.events ?? [], { silent: silently, cursor: s.eventCursor });
+      silentNext = false;
+      if (beforeCurrent && !timeline.current) { clearTimeout(presentationTimer); motion.cancelPresentation(); }
+      if (silently || hasLiveDecision(s)) displayFrame = null;
+      if (!timeline.current && timeline.queued) { advancePresentation(); return; }
+    }
+    const visual = stateWithFrame(s, displayFrame);
+    const meIdx = Math.max(0, visual.players.findIndex(p => p.id === visual.you));
+    const me = visual.players[meIdx];
+    const opp = visual.players[1 - meIdx];
     if (!me || !opp) return;
     motion.capture();
 
-    $('#fOppHand').innerHTML = Array.from({ length: opp.handCount }, (_, i) => {
+    setHTML($('#fOppHand'), Array.from({ length: opp.handCount }, (_, i) => {
       const off = i - (opp.handCount - 1) / 2;
       return `<div class="back" style="--rot:${-off * 3}deg;--dy:${-off * off * 1.5}px"></div>`;
-    }).join('');
-    $('#fOppAvatar').innerHTML = avatar(s, opp, 1);
-    $('#fMeAvatar').innerHTML = avatar(s, me, 0);
-    $('#fOppPiles').innerHTML = piles(s, opp);
-    $('#fMePiles').innerHTML = piles(s, me);
-    $('#fOppLands').innerHTML = backRow(s, opp);
-    $('#fMeLands').innerHTML = backRow(s, me);
-    $('#fOppCreatures').innerHTML = fieldRow(s, opp.battlefield.filter(c => !isBackRow(c)));
-    $('#fMeCreatures').innerHTML = fieldRow(s, me.battlefield.filter(c => !isBackRow(c)));
+    }).join(''));
+    setHTML($('#fOppAvatar'), avatar(visual, opp, 1));
+    setHTML($('#fMeAvatar'), avatar(visual, me, 0));
+    setHTML($('#fOppPiles'), piles(visual, opp));
+    setHTML($('#fMePiles'), piles(visual, me));
+    setHTML($('#fOppLands'), backRow(visual, opp));
+    setHTML($('#fMeLands'), backRow(visual, me));
+    setHTML($('#fOppCreatures'), fieldRow(visual, opp.battlefield.filter(c => !isBackRow(c))));
+    setHTML($('#fMeCreatures'), fieldRow(visual, me.battlefield.filter(c => !isBackRow(c))));
 
     // Na ponta da mão, as cartas do cemitério e do exílio que dá para usar agora, cada uma com a etiqueta da zona.
     const extra = outsideHand(s);
     const fan = [...me.hand.map(c => ({ c, tag: '' })), ...extra];
     const n = fan.length;
-    $('#fHand').innerHTML = fan.map(({ c, tag }, i) => {
+    $('#fHand').classList.toggle('crowded', n > 7);
+    setHTML($('#fHand'), fan.map(({ c, tag }, i) => {
       const off = i - (n - 1) / 2;
       const sel = tag || usable(s, c.id) ? 'playable' : '';
+      const openingSelected = !!s.input.openingSelected?.includes(c.id);
+      const openingSelection = s.input.opening === 'mulligan-bottom' ? ` aria-pressed="${openingSelected}"` : '';
       // Selo do custo acima do canto esquerdo: no leque, a carta seguinte cobre o canto direito, onde fica o custo impresso.
       const cost = !c.faceDown && c.manaCost ? `<div class="hcost" aria-hidden="true">${manaHTML(c.manaCost)}</div>` : '';
       const where = tag ? `<div class="hzone">${esc(tag)}</div>` : '';
-      return `<div class="hcard ${sel}${tag ? ' outside' : ''}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(label(c))}${tag ? ` (${esc(tag)})` : ''}"
-        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}${where}</div>`;
-    }).join('');
+      return `<div class="hand-slot"><div class="hcard ${sel}${tag ? ' outside' : ''}${openingSelected ? ' opening-selected' : ''}" data-fid="${c.id}" role="button" tabindex="0"${openingSelection} aria-label="${esc(label(c))}${tag ? ` (${esc(tag)})` : ''}"
+        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}${where}</div>${inspectButton(c)}</div>`;
+    }).join(''));
 
-    const stackEl = $('#fStack');
-    stackEl.innerHTML = stackPanel(s);
-    stackEl.hidden = !s.stack.length;
+    renderActivity();
 
-    const group = PHASE_GROUP[s.phase ?? ''] ?? '';
+    const group = PHASE_GROUP[visual.phase ?? ''] ?? '';
     // De quem é o turno: etiqueta no trilho de fases e brilho na metade da mesa do jogador ativo.
-    const active = s.gameOver ? null : s.activePlayer === me.id ? 'mine' : s.activePlayer === opp.id ? 'theirs' : null;
+    const active = s.gameOver ? null : visual.activePlayer === me.id ? 'mine' : visual.activePlayer === opp.id ? 'theirs' : null;
     root.querySelector('.field.me')!.classList.toggle('turn', active === 'mine');
     root.querySelector('.field.opp')!.classList.toggle('turn', active === 'theirs');
     const owner = active ? `<div class="turn-owner ${active}">${active === 'mine' ? 'Seu turno' : `Turno de ${esc(opp.name)}`}</div>` : '';
-    $('#fPhases').innerHTML = `<div class="turn-no">Turno ${s.turn}</div>${owner}` + PHASES.map(([k, l]) =>
-      `<div class="ph ${group === k ? 'on' : ''} ${s.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
+    $('#fPhases').innerHTML = `<div class="turn-no">Turno ${visual.turn}</div>${owner}` + PHASES.map(([k, l]) =>
+      `<div class="ph ${group === k ? 'on' : ''} ${visual.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
 
     // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
     const pc = s.input.card ?? s.input.targeting?.card;
     const promptCard = pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
       ? `<div class="prompt-card" data-peek="${pc.id}">${face(pc, 'normal')}</div>` : '';
-    $('#fAction').innerHTML = `${promptCard}<div class="prompt">${richText(s.input.message).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`;
-    $('#fLog').innerHTML = s.log.map(l => `<li>${esc(l)}</li>`).join('');
+    const opening = s.input.opening;
+    const prompt = s.input.priority && !s.input.paying && !s.input.targeting ? '' : opening === 'play-draw' || opening === 'mulligan' || (opening === 'mulligan-bottom' && s.input.openingReturnCount !== undefined) ? ''
+      : opening === 'mulligan-bottom' ? s.input.message.replace(/(\d+)\s+carta\(s\)/g, (_, n: string) => `${n} ${Number(n) === 1 ? 'carta' : 'cartas'}`) : s.input.message;
+    setHTML($('#fAction'), `${promptCard}<div class="prompt">${richText(prompt).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`);
+    announce(prompt || (opening === 'play-draw' ? 'Escolha quem joga primeiro.' : opening === 'mulligan' ? `Mão inicial: ${me.hand.length} cartas.` : opening === 'mulligan-bottom' ? `Cartas a devolver: ${s.input.openingReturnRemaining ?? s.input.openingReturnCount ?? 0}.` : ''));
 
     const qEl = $('#fQuestion');
     if (s.question && !s.gameOver) {
-      qEl.innerHTML = `<div class="question${qEl.hidden ? ' enter' : ''}" role="dialog" aria-modal="true">${questionHTML(s.question)}</div>`;
+      setHTML(qEl, `<div class="question" data-qid="${s.question.id}" role="dialog" aria-modal="true" aria-label="${esc(s.question.title)}">${questionHTML(s.question)}</div>`);
       qEl.hidden = false;
     } else {
       qEl.hidden = true;
@@ -619,13 +926,19 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     $('#fRoomTag').textContent = s.room ? `Sala ${s.room.code}` : '';
     $('#fRoomTag').hidden = !s.room;
     // Em rede não dá para recomeçar no meio: a revanche só existe no fim da partida, com os dois de acordo.
-    $('#fMenuRematch').hidden = !!s.room;
+    $('#fMenuRematch').hidden = !!s.room || (s.config?.matchLength === 'bo3' && !s.match?.over);
+    $('#fSeries').hidden = !s.match;
+    $('#fSeries').textContent = s.match ? `Jogo ${s.match.gameNumber} · ${s.match.wins.join(' × ')}` : '';
 
     const ov = $('#fOverlay');
-    if (s.gameOver && !disconnected) {
-      const won = s.winner === me.name;
-      const html = `<div class="result ${won ? 'win' : s.winner ? 'lose' : 'draw'}${ov.hidden ? '' : ' still'}">
-        <h2>${won ? 'Vitória' : s.winner ? 'Derrota' : 'Empate'}</h2><p>Turno ${s.turn}${s.winner ? ` · ${esc(s.winner)} venceu` : ''}</p>
+    if (s.sideboarding && !disconnected && !s.match?.over) {
+      setHTML(ov, sideboardingHTML(s));
+      ov.hidden = false;
+    } else if (s.gameOver && !disconnected) {
+      const abandoned = !!s.match?.abandoned;
+      const won = !abandoned && s.winner === me.name;
+      const html = `<div role="dialog" aria-modal="true" aria-label="Resultado da partida" class="result ${won ? 'win' : !abandoned && s.winner ? 'lose' : 'draw'}${ov.hidden ? '' : ' still'}">
+        <h2>${abandoned ? 'Partida encerrada' : won ? 'Vitória' : s.winner ? 'Derrota' : 'Empate'}</h2><p>${abandoned ? `Placar: ${s.match!.wins.join(' × ')}` : `Turno ${s.turn}${s.winner ? ` · ${esc(s.winner)} venceu` : ''}`}</p>
         ${rematchNote(s)}
         <div class="result-btns">${rematchButton(s)}<button class="arena-btn secondary" data-ui="exit">Início</button></div>
       </div>`;
@@ -633,14 +946,21 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       ov.hidden = false;
     } else if (!disconnected) { ov.hidden = true; ov.dataset.html = ''; }
 
-    if (zoneOf !== null) zoneView(s);
-
-    drawBlockArrows(s);
-    motion.play();
-    // Depois das animações começarem: as cartas que acabaram de entrar já estão na posição final.
-    drawTargetArrows(s);
-
-    lastLife = new Map(s.players.map(p => [p.id, p.life]));
+    if (zoneOf !== null || groupIds) zoneView(s);
+    root.querySelectorAll<HTMLElement>('[data-fid],[data-pid],[data-mana]').forEach(el => { el.dataset.gen = String(el.closest('.field,.avatar-slot') ? visual.input.gen : s.input.gen); });
+    // Covered identical copies stay reachable through the group chooser, without dozens of duplicate Tab stops.
+    root.querySelectorAll<HTMLElement>('.field .stack').forEach(stack => {
+      const slots = [...stack.querySelectorAll<HTMLElement>(':scope > .slot')];
+      slots.slice(0, -1).forEach(slot => slot.querySelectorAll<HTMLElement>('[tabindex],.inspect-card').forEach(el => { el.tabIndex = -1; }));
+    });
+    root.querySelectorAll<HTMLElement>('.row, .hand').forEach(el => { el.scrollLeft = scrollPositions.get(el.id) ?? 0; });
+    applyOpeningPresentation(root, s);
+    restoreFocus(savedFocus);
+    syncModal();
+    layoutStack();
+    drawBlockArrows(visual);
+    motion.play({ silent: silently || suppressOpeningPreview(s), semantic: !!s.events });
+    drawTargetArrows(visual);
     lastDamage = new Map(s.players.flatMap(p => p.battlefield.map(c => [c.id, c.damage ?? 0] as [number, number])));
   }
 
@@ -664,7 +984,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function findCard(id: number, withPrompt = true): FCard | undefined {
     const s = client?.state;
     if (!s) return undefined;
-    for (const p of s.players) {
+    for (const p of stateWithFrame(s, displayFrame).players) {
       for (const c of [...p.hand, ...p.battlefield, ...p.graveyard, ...p.exile, ...(p.emblems ?? [])]) if (c.id === id) return c;
     }
     const onStack = s.stack.find(si => si.source?.id === id)?.source;
@@ -675,37 +995,26 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return undefined;
   }
 
-  const s0 = () => client?.state;
-
-  function showPreview(c: FCard | undefined) {
-    const el = $('#fPreview');
-    if (!c || c.faceDown || !c.name) { el.hidden = true; return; }
-    if (c.emblem) {
-      const src = emblemSource(c);
-      el.innerHTML = `<div class="preview-card">${face({ ...c, name: src, manaCost: '', typeLine: 'Emblema', emblem: false }, 'normal')}</div>
-        <div class="preview-text"><p class="preview-note"><b>${esc(emblemLabel(c))}</b></p>${c.text ? `<p>${richText(c.text).replace(/\n/g, '<br>')}</p>` : ''}</div>`;
-      el.hidden = false;
-      return;
-    }
-    const text = ptOf(c.name)?.text || c.text;
-    const host = c.attachedTo != null ? findCard(c.attachedTo) : undefined;
-    const enchantedPlayer = s0()?.players.find(p => p.id === c.attachedToPlayer);
-    const atts = (s0()?.players ?? []).flatMap(p => p.battlefield).filter(a => a.attachedTo === c.id);
-    const notes = [
-      c.copyOf ? `<b>${esc(c.copyOf)}</b> copiando esta carta.` : '',
-      c.token ? 'Ficha.' : '',
-      c.creature && keywordsOf(c).length ? `<b>${esc(keywordsOf(c).map(k => KEYWORD_LABEL[k]).join(', '))}</b>.` : '',
-      c.creature && c.basePower !== undefined && (c.power !== c.basePower || c.toughness !== c.baseToughness)
-        ? `Base ${c.basePower}/${c.baseToughness}, agora ${c.power}/${c.toughness}.` : '',
-      host ? `Presa a <b>${esc(label(host))}</b>.` : enchantedPlayer ? `Encantando <b>${esc(enchantedPlayer.name)}</b>.` : '',
-      atts.length ? `Com ${atts.map(a => `<b>${esc(label(a))}</b>`).join(', ')}.` : '',
-    ].filter(Boolean).map(n => `<p class="preview-note">${n}</p>`).join('');
-    el.innerHTML = `<div class="preview-card">${face(c, 'normal')}</div>
-      ${text || notes ? `<div class="preview-text">${notes}${text ? `<p>${richText(text).replace(/\n/g, '<br>')}</p>` : ''}</div>` : ''}`;
-    el.hidden = false;
+  function showPreview(c: FCard | undefined, trigger?: HTMLElement, pinned = false) {
+    if (!pinned && (stackGalleryOpen || trigger?.closest('#fStack') || (client?.state && suppressOpeningPreview(client.state)))) return;
+    if (!c || c.faceDown || !c.name) { hideCardPreview(); return; }
+    const source = c.emblem ? emblemSource(c) : c.name;
+    const card = { ...c, name: c.emblem ? emblemLabel(c) : c.name,
+      image: c.image ?? image(source, 'normal'),
+      text: ptOf(c.name)?.text || c.text,
+      typeLine: c.emblem ? 'Emblema' : ptOf(c.name)?.type_line || c.typeLine };
+    if (pinned) inspectCard(card, trigger); else showCardPreview(card, trigger);
+  }
+  function cardFromElement(el: HTMLElement): FCard | undefined {
+    if (el.dataset.event) return timeline.history.find(event => event.seq === Number(el.dataset.event))?.card;
+    const stackId = el.dataset.stack ?? el.dataset.stackInspect;
+    if (stackId !== undefined && client?.state) return (el.closest('#fStackGallery') ? client.state.stack : stateWithFrame(client.state, displayFrame).stack).find(item => item.id === Number(stackId))?.source;
+    const id = el.dataset.inspect ?? el.dataset.fid ?? el.dataset.peek;
+    return id === undefined ? undefined : findCard(Number(id));
   }
 
   function notice(text: string, error = false) {
+    if (error && client?.state?.sideboarding) { sideboardError = text; sideboardBusy = false; render(); }
     const el = document.createElement('div');
     el.className = `toast ${error ? 'error' : ''}`;
     el.textContent = text;
@@ -718,15 +1027,64 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   root.addEventListener('click', e => {
     const t = e.target as HTMLElement;
     const ui = t.closest<HTMLElement>('[data-ui]')?.dataset.ui;
+    if (ui === 'stack-close' || t.id === 'fStackGallery') { closeStackGallery(); return; }
+    if (ui === 'stack-open') {
+      const s = client?.state;
+      if (!s?.stack.length || s.question || s.gameOver || s.sideboarding || disconnected) return;
+      stopPresentation(); hideCardPreview(true); stackGalleryOpen = true; renderTable(false);
+      $('#fStackGallery').querySelector<HTMLElement>('.stack-gallery-card.actionable, .stack-gallery-card')?.focus({ preventScroll: true });
+      return;
+    }
+    if (ui === 'settings') { $('#fSettings').hidden = !$('#fSettings').hidden; root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', String(!$('#fSettings').hidden)); return; }
+    if (ui === 'mute') { audio.setMuted(!audio.settings.muted); syncSettings(); return; }
+    if (ui === 'sideboard-ready' || ui === 'next-game') {
+      const sb = client?.state?.sideboarding;
+      if (!client || !sb || sb.ready || sideboardBusy || !sideboardDraft || sb.id !== sideboardDraft.id) return;
+      sideboardBusy = true; sideboardError = '';
+      if (ui === 'next-game') client.send({ type: 'next-game', id: sb.id });
+      else client.send({ type: 'sideboard', id: sb.id, deck: { name: 'Deck da partida', cards: sideboardDraft.main, sideboard: sideboardDraft.sideboard } });
+      render(); return;
+    }
+    const swap = t.closest<HTMLElement>('[data-sb-main],[data-sb-side]');
+    if (swap && sideboardDraft && !sideboardBusy && !client?.state?.sideboarding?.ready) {
+      const fromMain = swap.hasAttribute('data-sb-main');
+      const source = fromMain ? sideboardDraft.main : sideboardDraft.sideboard;
+      const target = fromMain ? sideboardDraft.sideboard : sideboardDraft.main;
+      const index = Number(fromMain ? swap.dataset.sbMain : swap.dataset.sbSide);
+      const entry = source[index];
+      if (entry) { const existing = target.find(c => c.name === entry.name); if (existing) existing.count++; else target.push({ name: entry.name, count: 1 }); if (--entry.count === 0) source.splice(index, 1); sideboardError = ''; render(); }
+      return;
+    }
+    const sbInspect = t.closest<HTMLElement>('[data-sb-inspect]');
+    if (sbInspect) { inspectCard({ name: sbInspect.dataset.sbInspect }, sbInspect); return; }
+    const inspecting = t.closest<HTMLElement>('[data-inspect],[data-event],[data-stack-inspect]');
+    if (inspecting) { showPreview(cardFromElement(inspecting), inspecting, true); return; }
+    const stackTarget = t.closest<HTMLElement>('[data-stack]');
+    if (stackTarget && client?.state) {
+      const id = Number(stackTarget.dataset.stack);
+      if (!renderedInputIsCurrent(stackTarget)) return;
+      if (!client.state.stack.some(item => item.id === id)) return;
+      if (!client.state.question && client.state.input.selectableStacks?.includes(id)) {
+        stopPresentation(); client.send({ type: 'stack', id, gen: Number(stackTarget.dataset.gen) });
+        if (stackGalleryOpen) closeStackGallery();
+      } else showPreview(cardFromElement(stackTarget), stackTarget, true);
+      return;
+    }
+    const grouped = t.closest<HTMLElement>('[data-group]');
+    if (grouped && client?.state) { groupIds = grouped.dataset.group!.split(',').map(Number); zoneOf = null; zoneView(client.state); return; }
+    const purePeek = t.closest<HTMLElement>('[data-peek]');
+    if (purePeek && !purePeek.closest('[data-gy]')) { showPreview(cardFromElement(purePeek), purePeek, true); return; }
+    const renderedQuestion = t.closest<HTMLElement>('[data-qid]');
+    if (renderedQuestion && Number(renderedQuestion.dataset.qid) !== client?.state?.question?.id) return;
     if (ui === 'menu') { $('#fMenu').hidden = !$('#fMenu').hidden; return; }
     if (ui === 'log') { $('#fLogDrawer').hidden = !$('#fLogDrawer').hidden; return; }
     if (ui === 'fullscreen') { void toggleFullscreen(); return; }
     if (ui === 'exit') {
-      if (client?.state?.gameOver || disconnected || confirm(client?.state?.room ? 'Desistir e sair da sala?' : 'Desistir desta partida?')) { client?.send({ type: 'concede' }); opts.onExit(); }
+      if (client?.state?.gameOver || disconnected || confirm(client?.state?.room ? 'Desistir e sair da sala?' : 'Desistir desta partida?')) { stopPresentation(); hideCardPreview(true); client?.send({ type: 'concede' }); opts.onExit(); }
       return;
     }
     if (ui === 'rematch') { $('#fMenu').hidden = true; opts.onRematch(); return; }
-    if (ui === 'zone-close' || t.id === 'fZone') { zoneOf = null; $('#fZone').hidden = true; return; }
+    if (ui === 'zone-close' || t.id === 'fZone') { closeZone(); return; }
     const ctr = t.closest<HTMLElement>('[data-ctr]')?.dataset.ctr ?? null;
     if (ctr || openCounter) {
       openCounter = ctr && ctr !== openCounter ? ctr : null;
@@ -735,7 +1093,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }
     if (!client) return;
     const gy = t.closest<HTMLElement>('[data-gy]');
-    if (gy && client.state) { zoneOf = +gy.dataset.gy!; zoneKind = gy.dataset.zone === 'exile' ? 'exile' : 'gy'; zoneView(client.state); return; }
+    if (gy && client.state) { groupIds = null; zoneOf = +gy.dataset.gy!; zoneKind = gy.dataset.zone === 'exile' ? 'exile' : 'gy'; zoneView(client.state); return; }
 
     const opt = t.closest<HTMLElement>('[data-q-opt]');
     if (opt && qState) {
@@ -757,11 +1115,15 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (conf) { answer({ value: conf.dataset.qConfirm === 'true' }); return; }
 
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
-    if (act === 'ok' || act === 'cancel') {
-      const gen = client.state?.input.gen ?? -1;
+    if (act === 'ok' || act === 'cancel' || act === 'pass-turn') {
+      const control = t.closest<HTMLElement>('[data-act]')!;
+      if (!renderedInputIsCurrent(control)) return;
+      if (act === 'pass-turn' && (!client.state?.input.priority || !client.state.input.ok.enabled || client.state.question || client.state.input.paying || client.state.input.targeting || client.state.activePlayer !== client.state.you || client.state.stack.length)) return;
+      const gen = Number(control.dataset.gen);
       if (gen === clickedGen && Date.now() - clickedAt < CLICK_LOCK_MS) return;
       clickedGen = gen;
       clickedAt = Date.now();
+      stopPresentation();
       client.send({ type: act, gen });
       render();
       setTimeout(() => { if (clickedGen === gen) render(); }, CLICK_LOCK_MS + 50);
@@ -769,74 +1131,138 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }
     if (t.closest('.emblem')) return; // fica dentro do retrato, mas não é um clique no jogador
     const mana = t.closest<HTMLElement>('[data-mana]')?.dataset.mana;
-    if (mana) { client.send({ type: 'mana', color: mana }); return; }
+    if (mana) { const control = t.closest<HTMLElement>('[data-mana]')!; if (renderedInputIsCurrent(control)) { stopPresentation(); client.send({ type: 'mana', color: mana, gen: Number(control.dataset.gen) }); } return; }
     const pl = t.closest<HTMLElement>('[data-pid]');
-    if (pl) { client.send({ type: 'player', id: +pl.dataset.pid! }); return; }
+    if (pl) { if (renderedInputIsCurrent(pl) && client.state?.input.selectablePlayers?.includes(+pl.dataset.pid!)) { stopPresentation(); client.send({ type: 'player', id: +pl.dataset.pid!, gen: Number(pl.dataset.gen) }); } return; }
     const cd = t.closest<HTMLElement>('[data-fid]');
-    if (!cd) return;
+    if (!cd || !renderedInputIsCurrent(cd)) return;
     // Usar uma carta do cemitério ou do exílio fecha a janela, para a pergunta seguinte aparecer.
-    if (cd.closest('#fZone')) { zoneOf = null; $('#fZone').hidden = true; }
-    client.send({ type: 'card', id: +cd.dataset.fid! });
+    if (cd.closest('#fZone')) closeZone();
+    stopPresentation();
+    client.send({ type: 'card', id: +cd.dataset.fid!, gen: Number(cd.dataset.gen) });
   });
   root.addEventListener('submit', e => {
-    if (!(e.target as HTMLElement).matches('[data-q-text]')) return;
+    const form = e.target as HTMLElement;
+    if (form.matches('[data-q-amount-form]')) {
+      e.preventDefault();
+      const q = client?.state?.question;
+      if (q?.kind !== 'amount' || Number(form.closest<HTMLElement>('[data-qid]')?.dataset.qid) !== q.id) return;
+      const status = amountStatus(q);
+      if (status.valid) answer({ amounts: status.amounts });
+      return;
+    }
+    if (!form.matches('[data-q-text]')) return;
     e.preventDefault();
+    if (Number((e.target as HTMLElement).closest<HTMLElement>('[data-qid]')?.dataset.qid) !== client?.state?.question?.id) return;
     answer({ text: (root.querySelector('#fQInput') as HTMLInputElement).value });
   });
   root.addEventListener('input', e => {
     const t = e.target as HTMLInputElement;
     if (t.id === 'fQInput' && qState) qState.text = t.value;
+    if (t.hasAttribute('data-q-amount') && qState && client?.state?.question?.kind === 'amount') {
+      const q = client.state.question;
+      if (Number(t.closest<HTMLElement>('[data-qid]')?.dataset.qid) !== q.id) return;
+      qState.amounts[Number(t.dataset.qAmount)] = t.value;
+      const status = amountStatus(q);
+      $('#fAmountRemaining').textContent = status.text;
+      (root.querySelector('[data-q-amount-submit]') as HTMLButtonElement).disabled = !status.valid;
+    }
+    if (t.id === 'fVolume') audio.setVolume(Number(t.value) / 100);
   });
+  root.addEventListener('change', e => {
+    const t = e.target as HTMLSelectElement;
+    if (t.id === 'fPace') { fast = t.value === 'fast'; try { localStorage.setItem('mesa:pace', fast ? 'fast' : 'normal'); } catch { /* Storage is optional. */ } }
+  });
+  const inspectable = '[data-fid],[data-peek],[data-event],[data-stack],[data-stack-inspect],[data-inspect]';
   root.addEventListener('pointerover', e => {
     if ((e as PointerEvent).pointerType !== 'mouse') return;
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-fid],[data-peek]');
-    if (el) showPreview(findCard(+(el.dataset.fid ?? el.dataset.peek!)));
+    const el = (e.target as HTMLElement).closest<HTMLElement>(inspectable);
+    if (el && !handDrag.active) showPreview(cardFromElement(el), el);
   });
   root.addEventListener('pointerout', e => {
     const to = (e as PointerEvent).relatedTarget as HTMLElement | null;
-    if (!to?.closest?.('[data-fid],[data-peek]')) $('#fPreview').hidden = true;
+    if (!to?.closest?.(`${inspectable},.card-inspector-preview`)) hideCardPreview();
+  });
+  root.addEventListener('focusin', e => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>(inspectable);
+    if (el && !handDrag.active) showPreview(cardFromElement(el), el);
+  });
+  root.addEventListener('focusout', e => {
+    const to = e.relatedTarget as HTMLElement | null;
+    if (!to?.closest?.(`${inspectable},.card-inspector-preview`)) hideCardPreview();
   });
   root.addEventListener('contextmenu', e => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-fid],[data-peek]');
+    const el = (e.target as HTMLElement).closest<HTMLElement>(inspectable);
     if (!el) return;
-    e.preventDefault();
-    showPreview(findCard(+(el.dataset.fid ?? el.dataset.peek!)));
+    e.preventDefault(); showPreview(cardFromElement(el), el, true);
   });
   root.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && zoneOf !== null) { zoneOf = null; $('#fZone').hidden = true; return; }
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mana],[data-ctr],[data-fid],[data-pid],[data-gy]');
-    if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
+    if (e.key === 'Escape') {
+      if (stackGalleryOpen) { e.preventDefault(); closeStackGallery(); return; }
+      if (zoneOf !== null || groupIds) { closeZone(); return; }
+      $('#fMenu').hidden = true; $('#fSettings').hidden = true; $('#fLogDrawer').hidden = true; root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', 'false'); hideCardPreview(true);
+    }
+    const target = e.target as HTMLElement;
+    if (stackGalleryOpen && target.matches('.stack-gallery-card') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+      const cards = [...$('#fStackGallery').querySelectorAll<HTMLElement>('.stack-gallery-card')];
+      const index = cards.indexOf(target);
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? cards.length - 1 : Math.max(0, Math.min(cards.length - 1, index + (e.key === 'ArrowRight' ? 1 : -1)));
+      e.preventDefault(); cards[next]?.focus({ preventScroll: true }); cards[next]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }); return;
+    }
+    if (e.key.toLowerCase() === 'i' && !target.matches('input,textarea,select')) {
+      const el = target.closest<HTMLElement>(inspectable);
+      if (el) { e.preventDefault(); showPreview(cardFromElement(el), el, true); return; }
+    }
+    if (e.key === 'Tab' && currentModal) {
+      const focusable = [...currentModal.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select,[tabindex="0"]')].filter(el => !el.closest('[hidden]'));
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (first && e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (last && !e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    if (e.repeat) return;
+    const el = target.closest<HTMLElement>('[data-mana],[data-ctr],[data-fid],[data-pid],[data-gy],[data-peek]');
+    if (el && !el.matches('button') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
   });
 
   return {
     attach(c, pics) {
       client = c; portraits = pics; lastTurn = 0; disconnected = false; qState = null; clickedGen = -1; zoneOf = null;
-      lastLife = new Map(); lastDamage = new Map();
+      lastDamage = new Map(); groupIds = null;
+      stackGalleryOpen = false; $('#fStackGallery').hidden = true;
+      handDrag.cancel(); stopPresentation(); timeline.reset(); silentNext = true; hideCardPreview(true);
+      sideboardDraft = null; sideboardBusy = false; sideboardError = '';
       motion.reset();
       $('#fOverlay').hidden = true;
       $('#fQuestion').hidden = true;
       $('#fZone').hidden = true;
+      syncModal();
     },
     render,
     notice,
     reconnecting(attempt) {
       disconnected = true;
+      if (stackGalleryOpen) closeStackGallery();
+      handDrag.cancel(); stopPresentation(); silentNext = true;
       const ov = $('#fOverlay');
       ov.hidden = false;
       ov.dataset.html = '';
-      ov.innerHTML = `<div class="result draw still"><h2>Reconectando…</h2>
+      ov.innerHTML = `<div role="dialog" aria-modal="true" aria-label="Reconectando" class="result draw still"><h2>Reconectando…</h2>
         <p>A conexão com a ponte caiu. Voltando à partida${attempt > 1 ? ` (tentativa ${attempt})` : ''}.</p>
         <div class="result-btns"><button class="arena-btn secondary" data-ui="exit">Início</button></div></div>`;
+      syncModal();
     },
     disconnected(reason) {
       disconnected = true;
+      if (stackGalleryOpen) closeStackGallery();
+      handDrag.cancel(); stopPresentation(); silentNext = true;
       const room = !!client?.state?.session;
       const ov = $('#fOverlay');
       ov.hidden = false;
       ov.dataset.html = '';
-      ov.innerHTML = `<div class="result draw"><h2>Conexão perdida</h2>
+      ov.innerHTML = `<div role="dialog" aria-modal="true" aria-label="Conexão perdida" class="result draw"><h2>Conexão perdida</h2>
         <p>${reason ? esc(reason) : room ? 'Não consegui voltar sozinho. A partida fica guardada na ponte por alguns minutos.' : 'A ponte do Forge parou de responder.'}</p>
         <div class="result-btns"><button class="arena-btn primary" data-ui="rematch">${room ? 'Reconectar' : 'Tentar de novo'}</button><button class="arena-btn secondary" data-ui="exit">Início</button></div></div>`;
+      syncModal();
     },
   };
 }
