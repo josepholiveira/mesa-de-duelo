@@ -107,6 +107,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     <div class="hand" id="fHand"></div>
 
     <div class="stack-panel" id="fStack" hidden></div>
+    <svg class="target-arrows" id="fTargets" aria-hidden="true"></svg>
     <nav class="phase-rail" id="fPhases" aria-label="Fases do turno"></nav>
     <div class="action" id="fAction" aria-live="polite"></div>
     <div class="preview" id="fPreview" hidden></div>
@@ -240,9 +241,55 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     // O estado chega várias vezes no mesmo combate: só redesenha (e reanima) quando as setas mudam.
     if (svg.dataset.html !== html) { svg.innerHTML = html; svg.dataset.html = html; }
   }
+
+  /**
+   * Setas de alvo: da carta que alveja até cada carta ou jogador escolhido. Enquanto você escolhe os alvos, a seta
+   * sai da carta que está sendo conjurada (azul); depois, de cada item da pilha (dourado se for seu, vermelho se
+   * for do oponente).
+   */
+  function drawTargetArrows(s: FState) {
+    const svg = root.querySelector<SVGSVGElement>('#fTargets')!;
+    const box = svg.getBoundingClientRect();
+    const q = (sel: string) => root.querySelector(sel)?.getBoundingClientRect();
+    const targetRect = (kind: 'c' | 'p', id: number) =>
+      kind === 'p' ? q(`.avatar-slot [data-pid="${id}"]`) : q(`.field [data-fid="${id}"]`) ?? q(`#fHand [data-fid="${id}"]`);
+    const links: { from: DOMRect; to: DOMRect; cls: string }[] = [];
+    const add = (from: DOMRect | undefined, t: { cards?: number[]; players?: number[] } | undefined, cls: string) => {
+      if (!from || !t) return;
+      for (const id of t.cards ?? []) { const to = targetRect('c', id); if (to) links.push({ from, to, cls }); }
+      for (const id of t.players ?? []) { const to = targetRect('p', id); if (to) links.push({ from, to, cls }); }
+    };
+    s.stack.forEach((si, i) => {
+      const from = q(`#fStack li:nth-child(${i + 1}) .stack-card`) ?? (si.source ? q(`.field [data-fid="${si.source.id}"]`) : undefined);
+      add(from, si.targets, si.controller === s.you ? 'mine' : 'theirs');
+    });
+    const tg = s.input.targeting;
+    if (tg && !s.gameOver) {
+      const from = q(`#fAction [data-peek="${tg.source}"]`) ?? q(`#fHand [data-fid="${tg.source}"]`) ?? q(`.field [data-fid="${tg.source}"]`);
+      add(from, tg, 'choosing');
+    }
+    const paths = links.map(({ from, to, cls }) => {
+      const fx = from.left + from.width / 2 - box.left, fy = from.top + from.height / 2 - box.top;
+      const ex = to.left + to.width / 2 - box.left, ey = to.top + to.height / 2 - box.top;
+      // Sai da borda da carta de origem, para não cobrir a arte dela.
+      const edge = Math.min(from.width / 2 / (Math.abs(ex - fx) || 1e-6), from.height / 2 / (Math.abs(ey - fy) || 1e-6), 1);
+      const sx = fx + (ex - fx) * edge, sy = fy + (ey - fy) * edge;
+      // Curva para o lado, para não passar reta por cima das cartas do meio e as setas da mesma origem não se sobreporem.
+      const dx = ex - sx, dy = ey - sy, len = Math.hypot(dx, dy) || 1, bend = Math.min(120, len * 0.25);
+      const cx = (sx + ex) / 2 - (dy / len) * bend, cy = (sy + ey) / 2 + (dx / len) * bend;
+      const d = `M${sx.toFixed(1)} ${sy.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+      return `<path class="arrow-under" d="${d}"/><path class="arrow ${cls}" d="${d}" marker-end="url(#fTargetHead-${cls})"/>` +
+        `<circle class="ring ${cls}" cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="${(Math.min(to.width, to.height) * 0.32).toFixed(1)}"/>`;
+    });
+    const head = (cls: string) => `<marker id="fTargetHead-${cls}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+      <path class="head ${cls}" d="M0 0 10 5 0 10z" stroke="#120800" stroke-width="1"/></marker>`;
+    const html = paths.length ? `<defs>${['mine', 'theirs', 'choosing'].map(head).join('')}</defs>${paths.join('')}` : '';
+    if (svg.dataset.html !== html) { svg.innerHTML = html; svg.dataset.html = html; }
+  }
+
   window.addEventListener('resize', () => {
     const s = client?.state;
-    if (s?.type === 'state' && !root.hidden) drawBlockArrows(s);
+    if (s?.type === 'state' && !root.hidden) { drawBlockArrows(s); drawTargetArrows(s); }
   });
 
   const COUNTER_LABEL: Record<string, string> = { P1P1: '+1/+1', M1M1: '-1/-1', LOYALTY: 'Lealdade', SHIELD: 'Escudo', STUN: 'Atordoar' };
@@ -544,7 +591,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       `<div class="ph ${group === k ? 'on' : ''} ${s.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
 
     // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
-    const pc = s.input.card;
+    const pc = s.input.card ?? s.input.targeting?.card;
     const promptCard = pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
       ? `<div class="prompt-card" data-peek="${pc.id}">${face(pc, 'normal')}</div>` : '';
     $('#fAction').innerHTML = `${promptCard}<div class="prompt">${richText(s.input.message).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`;
@@ -590,6 +637,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
     drawBlockArrows(s);
     motion.play();
+    // Depois das animações começarem: as cartas que acabaram de entrar já estão na posição final.
+    drawTargetArrows(s);
 
     lastLife = new Map(s.players.map(p => [p.id, p.life]));
     lastDamage = new Map(s.players.flatMap(p => p.battlefield.map(c => [c.id, c.damage ?? 0] as [number, number])));

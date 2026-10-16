@@ -152,6 +152,19 @@ a { color: var(--gold); }
 .combat-arrows .arrow, .combat-arrows .arrow-under { fill: none; stroke-linecap: round; animation: fade-in 0.3s 0.25s ease both; }
 .combat-arrows .arrow-under { stroke: rgba(20, 10, 0, 0.7); stroke-width: 8px; }
 .combat-arrows .arrow { stroke: var(--gold); stroke-width: 3.5px; stroke-dasharray: 10 6; }
+.target-arrows { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; overflow: visible; }
+.target-arrows .arrow, .target-arrows .arrow-under, .target-arrows .ring { fill: none; stroke-linecap: round; animation: fade-in 0.25s ease both; }
+.target-arrows .arrow-under { stroke: rgba(10, 5, 0, 0.65); stroke-width: 8px; }
+.target-arrows .arrow { stroke-width: 3.5px; stroke-dasharray: 12 6; animation: fade-in 0.25s ease both, target-flow 0.8s linear infinite; }
+.target-arrows .ring { stroke-width: 3px; }
+.target-arrows .mine { stroke: var(--gold); }
+.target-arrows .theirs { stroke: var(--red); }
+.target-arrows .choosing { stroke: #6cc4ff; }
+.target-arrows .head.mine { fill: var(--gold); }
+.target-arrows .head.theirs { fill: var(--red); }
+.target-arrows .head.choosing { fill: #6cc4ff; }
+@keyframes target-flow { to { stroke-dashoffset: -18; } }
+@media (prefers-reduced-motion: reduce) { .target-arrows .arrow { animation: fade-in 0.25s ease both; } }
 .pt {
   position: absolute; right: 3%; bottom: 3%; z-index: 2;
   padding: 1px 6px; border-radius: 4px; background: #f3efe4; color: #1b1a17;

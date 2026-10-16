@@ -25,9 +25,12 @@ import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.player.PlayerView;
 import forge.game.player.RegisteredPlayer;
+import forge.game.spellability.SpellAbility;
 import forge.game.spellability.StackItemView;
 import forge.gamemodes.match.HostedMatch;
 import forge.gamemodes.match.input.InputPayMana;
+import forge.gamemodes.match.input.InputSelectTargets;
+import forge.gamemodes.match.input.TargetingProgress;
 import forge.gamemodes.net.IRemote;
 import forge.gamemodes.net.ProtocolMethod;
 import forge.gamemodes.net.event.GuiGameEvent;
@@ -452,6 +455,50 @@ final class Session {
         }
     }
 
+    private static java.lang.reflect.Field selectTargetsSa, payManaSa;
+
+    /**
+     * Mágica sendo conjurada (escolhendo alvos ou pagando o custo): a carta que alveja ({@code source}) e os alvos
+     * já escolhidos, para a mesa desenhar as setas. O Forge não expõe a habilidade desses inputs, então ela é lida
+     * por reflexão. No pagamento só vale para o que ainda não está na pilha (lá os alvos vão com o item).
+     */
+    private static JsonObject targeting(Seat seat) {
+        if (!(seat.controller() instanceof PlayerControllerHuman pch)) return null;
+        Object in = pch.getInputQueue().getInput();
+        try {
+            SpellAbility sa;
+            if (in instanceof InputSelectTargets) {
+                if (selectTargetsSa == null) selectTargetsSa = accessible(InputSelectTargets.class, "sa");
+                sa = (SpellAbility) selectTargetsSa.get(in);
+            } else if (in instanceof InputPayMana) {
+                if (payManaSa == null) payManaSa = accessible(InputPayMana.class, "saPaidFor");
+                sa = (SpellAbility) payManaSa.get(in);
+                if (sa != null && sa.getHostCard() != null
+                    && sa.getHostCard().getGame().getStack().getInstanceMatchingSpellAbilityID(sa.getRootAbility()) != null) return null;
+            } else {
+                return null;
+            }
+            if (sa == null || sa.getHostCard() == null) return null;
+            JsonObject o = StateJson.targets(TargetingProgress.chosenTargets(sa));
+            if (o == null) {
+                if (in instanceof InputPayMana) return null;
+                o = new JsonObject();
+            }
+            o.addProperty("source", sa.getHostCard().getId());
+            // Ao conjurar, a carta já saiu da mão: vai junto para a mesa mostrar de onde sai a seta.
+            o.add("card", StateJson.card(CardView.get(sa.getHostCard())));
+            return o;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static java.lang.reflect.Field accessible(Class<?> c, String name) throws NoSuchFieldException {
+        java.lang.reflect.Field f = c.getDeclaredField(name);
+        f.setAccessible(true);
+        return f;
+    }
+
     /** Monta o estado visto por um jogador; null se uma leitura concorrente falhar (refeita no próximo ciclo). */
     private JsonObject state(Seat seat) {
         HostedMatch m = match;
@@ -482,6 +529,8 @@ final class Session {
                 if (seat.controller() instanceof PlayerControllerHuman pch && pch.getInputQueue().getInput() instanceof InputPayMana) {
                     input.addProperty("paying", true);
                 }
+                JsonObject targeting = targeting(seat);
+                if (targeting != null) input.add("targeting", targeting);
                 CardView promptCard = seat.promptCard;
                 if (promptCard != null) input.add("card", StateJson.card(promptCard));
                 state.add("input", input);

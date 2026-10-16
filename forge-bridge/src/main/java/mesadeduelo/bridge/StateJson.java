@@ -59,6 +59,8 @@ final class StateJson {
                 s.addProperty("text", si.getText());
                 if (si.getSourceCard() != null) s.add("source", card(si.getSourceCard()));
                 if (si.getActivatingPlayer() != null) s.addProperty("controller", si.getActivatingPlayer().getId());
+                JsonObject t = stackTargets(si);
+                if (t != null) s.add("targets", t);
                 stack.add(s);
             }
         }
@@ -260,5 +262,30 @@ final class StateJson {
         Map<CounterType, Integer> m = new java.util.LinkedHashMap<>();
         for (CounterType t : c.getCounters().elementSet()) m.put(t, c.getCounters().count(t));
         return m;
+    }
+
+    /** Alvos de um item da pilha, somando as sub-habilidades (ex.: "destrua X e compre um card" com dois alvos). */
+    private static JsonObject stackTargets(StackItemView si) {
+        List<Object> all = new java.util.ArrayList<>();
+        for (StackItemView step = si; step != null; step = step.getSubInstance()) {
+            if (step.getTargetCards() != null) all.addAll(step.getTargetCards());
+            if (step.getTargetPlayers() != null) all.addAll(step.getTargetPlayers());
+        }
+        return targets(all);
+    }
+
+    /** {cards:[ids], players:[ids]} a partir de CardView/PlayerView; null se não houver alvo. */
+    static JsonObject targets(Iterable<?> views) {
+        JsonArray cards = new JsonArray(), players = new JsonArray();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Object v : views) {
+            if (v instanceof CardView c && seen.add("c" + c.getId())) cards.add(c.getId());
+            else if (v instanceof PlayerView p && seen.add("p" + p.getId())) players.add(p.getId());
+        }
+        if (cards.isEmpty() && players.isEmpty()) return null;
+        JsonObject o = new JsonObject();
+        o.add("cards", cards);
+        o.add("players", players);
+        return o;
     }
 }

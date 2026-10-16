@@ -91,7 +91,7 @@ export interface FState {
   players: FPlayer[];
   /** Cartas do cemitério ou do exílio (de qualquer jogador) que você pode usar agora: flashback, tramadas... */
   castable?: number[];
-  stack: { id: number; text: string; source?: FCard; controller?: number }[];
+  stack: { id: number; text: string; source?: FCard; controller?: number; targets?: FTargets }[];
   combat: { attacker: number; defender?: number; blockers: number[] }[];
   log: string[];
   you: number;
@@ -99,13 +99,18 @@ export interface FState {
   /** actionable: cartas que podem ser usadas agora (jogáveis, atacantes ou bloqueadores possíveis). */
   /** card: carta citada pelo prompt (ex.: a do topo do grimório na vidência ou na vigilância de 1). */
   /** paying: pagando um custo de mana; a mana da reserva pode ser gasta com {type:"mana", color}. */
-  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard; paying?: boolean };
+  /** targeting: escolhendo alvos; source é a carta que alveja (card traz os dados dela) e o resto são os alvos já escolhidos. */
+  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
+    targeting?: FTargets & { source: number; card?: FCard } };
   question?: FQuestion;
   room?: FRoom;
   /** Para voltar a esta partida se a conexão cair: {type:"rejoin", code, token}. */
   session?: { code: string; token: string; room: boolean };
   decks: string[];
 }
+
+/** Alvos de uma mágica ou habilidade: ids de cartas e de jogadores. */
+export interface FTargets { cards?: number[]; players?: number[] }
 
 export type ClientMessage =
   | { type: 'start'; you: unknown; opponent: unknown }

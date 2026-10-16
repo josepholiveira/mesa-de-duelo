@@ -42,11 +42,14 @@ Pela raiz do projeto, os mesmos comandos são `npm run forge:instalar` e `npm ru
   "players": [{ "id": 0, "name": "Você", "life": 20, "library": 30, "handCount": 6,
                 "hand": [/* cartas; vazio para o oponente */], "battlefield": [], "graveyard": [], "exile": [],
                 "pool": { "W": 0, "U": 0, "B": 0, "R": 0, "G": 1, "C": 0 } }],
-  "stack": [{ "id": 12, "text": "...", "source": { /* carta */ }, "controller": 1 }],
+  "stack": [{ "id": 12, "text": "...", "source": { /* carta */ }, "controller": 1,
+              "targets": { "cards": [40], "players": [] } }], // alvos, somando as sub-habilidades
   "combat": [{ "attacker": 40, "defender": 0, "blockers": [33] }],
   "log": ["..."],
   "input": { "message": "Prioridade: Você ...", "ok": { "label": "OK", "enabled": true },
-             "cancel": { "label": "Fim de Turno", "enabled": true }, "selectable": [29, 31] },
+             "cancel": { "label": "Fim de Turno", "enabled": true }, "selectable": [29, 31],
+             // conjurando (escolhendo alvos ou pagando): a carta que alveja e os alvos já escolhidos
+             "targeting": { "source": 18, "card": { /* carta */ }, "cards": [], "players": [1] } },
   "question": null,
   "session": { "code": "K7QM", "token": "...", "room": true }, // para voltar com "rejoin" se a conexão cair
   "room": null, // em rede: { "code": "K7QM", "seat": 0, "token": "...", "started": true,

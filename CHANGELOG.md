@@ -6,6 +6,11 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.6.0] - 2026-10-16
+
+### Novo
+- Setas de alvo: ao escolher o alvo de uma mágica ou habilidade, uma seta azul sai da carta e vai até a criatura, permanente ou jogador escolhido, e continua lá enquanto você paga o custo. Com a mágica na pilha, a seta sai do item da pilha: dourada se for sua, vermelha se for do oponente. Assim dá para ver o que a IA está mirando antes de responder.
+
 ## [0.5.1] - 2026-10-16
 
 ### Correções
