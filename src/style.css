@@ -103,7 +103,13 @@ a { color: var(--gold); }
 
 .slot { position: relative; width: var(--cw); height: var(--ch); flex: 0 1 auto; min-width: 18px; transition: width 0.2s ease; }
 .slot.tapped { width: var(--ch); }
-.stack { display: flex; }
+.stack { position: relative; display: flex; }
+.stack-n {
+  position: absolute; z-index: 5; right: -4px; top: -6px; padding: 1px 6px; border-radius: 999px; pointer-events: none;
+  background: rgba(8, 12, 24, 0.9); border: 1px solid rgba(242, 181, 76, 0.6); color: var(--ink); font: 700 11px var(--display);
+}
+.perm-group { display: flex; align-items: center; gap: 1.4vw; min-width: 0; }
+.perm-group + .perm-group { margin-left: 1.6vw; padding-left: 2.2vw; border-left: 1px solid rgba(242, 181, 76, 0.22); }
 .stack > .slot { flex-shrink: 0; }
 .stack > .slot + .slot { margin-left: calc(var(--cw) * -0.82); }
 .stack > .slot.tapped + .slot.tapped { margin-left: calc(var(--ch) * -0.86); }

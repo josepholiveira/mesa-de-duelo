@@ -132,17 +132,22 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
   // ---------- Imagens do Scryfall, buscadas por nome ----------
   const wanted = new Set<string>();
+  /** Nomes já pedidos ao Scryfall: o que ele não conhece (fichas, nomes do Forge) não é pedido de novo a cada desenho. */
+  const asked = new Set<string>();
   let fetchTimer = 0;
   function image(name: string | undefined, size: 'small' | 'normal') {
     if (!name) return undefined;
     const sc = cacheGet(name);
     if (!sc) {
+      if (asked.has(name)) return undefined;
+      asked.add(name);
       wanted.add(name);
       clearTimeout(fetchTimer);
       fetchTimer = window.setTimeout(() => {
         const names = [...wanted];
         wanted.clear();
-        fetchByNames(names).then(render).catch(() => {});
+        // Falha (sem rede, limite do Scryfall): libera os nomes para tentar de novo daqui a 30 s.
+        fetchByNames(names).then(render).catch(() => setTimeout(() => names.forEach(n => asked.delete(n)), 30_000));
       }, 150);
       return undefined;
     }
@@ -161,7 +166,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (c.faceDown || !c.name) return '<div class="face"><div class="back" style="width:100%;height:100%"></div></div>';
     return faceHTML({
       name: label(c), manaCost: c.manaCost ?? '', typeLine: ptOf(c.name)?.type_line || c.typeLine || '', power: c.power, toughness: c.toughness,
-      creature: !!c.creature, color: colorFromCost(c.manaCost ?? '', !!c.land), image: image(c.name, size),
+      creature: !!c.creature, color: colorFromCost(c.manaCost ?? '', !!c.land), image: c.image ?? image(c.name, size),
     });
   }
 
@@ -297,14 +302,31 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return cards.filter(c => c.attachedTo == null || !byId.has(c.attachedTo)).map(c => bfCard(s, c, atts.get(c.id))).join('');
   }
 
-  function landRow(s: FState, p: FPlayer) {
+  /** Fileira de trás: terrenos e artefatos/encantamentos que não são criaturas (nem planeswalkers ou batalhas). */
+  function isBackRow(c: FCard) {
+    if (c.creature || c.planeswalker) return false;
+    return !!c.land || /\b(Artifact|Enchantment)\b/i.test(c.typeLine ?? '');
+  }
+
+  /** Empilha cópias iguais (mesmo nome, estado e marcadores); cartas com algo preso ficam sozinhas. */
+  function stacks(s: FState, cards: FCard[]) {
     const atts = attachmentsOf(s);
     const groups = new Map<string, FCard[]>();
-    for (const c of p.battlefield.filter(c => c.land && !c.creature)) {
-      const k = atts.has(c.id) ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}`;
+    for (const c of cards) {
+      const ctr = Object.entries(c.counters ?? {}).filter(([, v]) => v).sort().join(',');
+      const k = atts.has(c.id) || c.faceDown ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}|${c.token}|${c.copyOf ?? ''}|${ctr}`;
       groups.set(k, [...(groups.get(k) ?? []), c]);
     }
-    return [...groups.values()].map(cs => `<div class="stack">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}</div>`).join('');
+    return [...groups.values()].map(cs => `<div class="stack">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}${
+      cs.length > 1 ? `<span class="stack-n" aria-hidden="true">×${cs.length}</span>` : ''}</div>`).join('');
+  }
+
+  function backRow(s: FState, p: FPlayer) {
+    const byId = battlefieldById(s);
+    const back = p.battlefield.filter(c => isBackRow(c) && (c.attachedTo == null || !byId.has(c.attachedTo)));
+    const lands = stacks(s, back.filter(c => c.land));
+    const others = stacks(s, back.filter(c => !c.land));
+    return `${lands ? `<div class="perm-group lands-group">${lands}</div>` : ''}${others ? `<div class="perm-group others-group" aria-label="Artefatos e encantamentos">${others}</div>` : ''}`;
   }
 
   function avatar(s: FState, p: FPlayer, idx: number) {
@@ -446,10 +468,10 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     $('#fMeAvatar').innerHTML = avatar(s, me, 0);
     $('#fOppPiles').innerHTML = piles(opp);
     $('#fMePiles').innerHTML = piles(me);
-    $('#fOppLands').innerHTML = landRow(s, opp);
-    $('#fMeLands').innerHTML = landRow(s, me);
-    $('#fOppCreatures').innerHTML = fieldRow(s, opp.battlefield.filter(c => !c.land || c.creature));
-    $('#fMeCreatures').innerHTML = fieldRow(s, me.battlefield.filter(c => !c.land || c.creature));
+    $('#fOppLands').innerHTML = backRow(s, opp);
+    $('#fMeLands').innerHTML = backRow(s, me);
+    $('#fOppCreatures').innerHTML = fieldRow(s, opp.battlefield.filter(c => !isBackRow(c)));
+    $('#fMeCreatures').innerHTML = fieldRow(s, me.battlefield.filter(c => !isBackRow(c)));
 
     const n = me.hand.length;
     $('#fHand').innerHTML = me.hand.map((c, i) => {

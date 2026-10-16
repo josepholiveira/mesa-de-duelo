@@ -5,6 +5,8 @@ export interface FCard {
   controller?: number;
   tapped: boolean;
   token: boolean;
+  /** Imagem da ficha no Scryfall, calculada pela ponte (fichas não são achadas pelo nome). */
+  image?: string;
   faceDown?: boolean;
   name?: string;
   set?: string;

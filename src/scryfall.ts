@@ -1,3 +1,11 @@
+type Images = { small?: string; normal?: string; art_crop?: string };
+
+/**
+ * Versão do formato guardado no cache. Cartas de duas faces salvas antes da v2 ficaram sem imagem
+ * (o Scryfall põe as imagens dentro de cada face) e são buscadas de novo.
+ */
+const FORMAT = 2;
+
 /** Subconjunto dos campos do Scryfall que o jogo usa. */
 export interface ScryCard {
   name: string;
@@ -11,10 +19,14 @@ export interface ScryCard {
   color_identity?: string[];
   image_uris?: { small?: string; normal?: string; art_crop?: string };
   faces?: boolean;
+  /** Nome e imagem de cada face (cartas de duas faces: o Forge chama a carta pelo nome da face visível). */
+  faceNames?: string[];
+  faceImages?: (Images | undefined)[];
   /** Impressão em português, quando existe. */
-  pt?: { name?: string; type_line?: string; text?: string; image_uris?: { small?: string; normal?: string; art_crop?: string } };
+  pt?: { name?: string; type_line?: string; text?: string; image_uris?: Images; faceNames?: string[]; faceImages?: (Images | undefined)[] };
   /** Já procuramos a impressão em português (achando ou não). */
   ptChecked?: boolean;
+  v?: number;
 }
 
 /**
@@ -51,25 +63,33 @@ async function request(path: string, body?: unknown): Promise<{ status: number; 
   });
 }
 
-const images = (u: any) => u && { small: u.small, normal: u.normal, art_crop: u.art_crop };
+const images = (u: any): Images | undefined => u && { small: u.small, normal: u.normal, art_crop: u.art_crop };
+/** O /cards/collection não acha "Frente // Verso" (nem cartas divididas como "Fire // Ice"), só o nome da frente. */
+const lookupName = (name: string) => name.split(' // ')[0];
+const noScan = (c: any) => c.image_status === 'placeholder' || c.image_status === 'missing';
 
 /** Nome, tipo, texto e imagem de uma impressão em português (cartas de duas faces juntam as faces). */
 function slimPt(c: any): ScryCard['pt'] {
   const faces: any[] = Array.isArray(c.card_faces) ? c.card_faces : [];
   const join = (k: string, sep: string) => faces.map(f => f[k]).filter(Boolean).join(sep) || undefined;
+  // Sem scan da impressão traduzida o Scryfall devolve um aviso no lugar da arte; aí vale a imagem em inglês.
+  const faceImages = noScan(c) ? undefined : faces.map(f => images(f.image_uris));
   return {
     name: c.printed_name ?? join('printed_name', ' // '),
     type_line: c.printed_type_line ?? join('printed_type_line', ' // '),
     text: c.printed_text ?? join('printed_text', '\n—\n'),
-    // Sem scan da impressão traduzida o Scryfall devolve um aviso no lugar da arte; aí vale a imagem em inglês.
-    image_uris: c.image_status === 'placeholder' || c.image_status === 'missing'
-      ? undefined : images(c.image_uris ?? faces[0]?.image_uris),
+    image_uris: noScan(c) ? undefined : images(c.image_uris) ?? faceImages?.[0],
+    faceNames: faces.length ? faces.map(f => f.printed_name) : undefined,
+    faceImages: faceImages?.length ? faceImages : undefined,
   };
 }
 
 function slim(c: any): ScryCard {
   const pt = c.lang === 'pt';
+  const faces: any[] = Array.isArray(c.card_faces) ? c.card_faces : [];
+  const faceImages = noScan(c) ? [] : faces.map(f => images(f.image_uris));
   return {
+    v: FORMAT,
     name: c.name,
     layout: c.layout,
     mana_cost: c.mana_cost,
@@ -79,8 +99,10 @@ function slim(c: any): ScryCard {
     toughness: c.toughness,
     colors: c.colors,
     color_identity: c.color_identity,
-    image_uris: c.image_status === 'placeholder' || c.image_status === 'missing' ? undefined : images(c.image_uris),
-    faces: Array.isArray(c.card_faces) || undefined,
+    image_uris: noScan(c) ? undefined : images(c.image_uris) ?? faceImages[0],
+    faces: faces.length > 0 || undefined,
+    faceNames: faces.length ? faces.map(f => f.name) : undefined,
+    faceImages: faceImages.some(Boolean) ? faceImages : undefined,
     pt: pt ? slimPt(c) : undefined,
     ptChecked: pt || undefined,
   };
@@ -89,11 +111,28 @@ function slim(c: any): ScryCard {
 export function cacheGet(name: string): ScryCard | null {
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + name.toLowerCase());
-    return raw ? JSON.parse(raw) : null;
+    const c: ScryCard | null = raw ? JSON.parse(raw) : null;
+    return c && c.faces && c.v !== FORMAT ? null : c;
   } catch { return null; }
 }
+
+/** A carta vista por uma das faces: imagem e nome em português daquela face. */
+function faceView(card: ScryCard, i: number): ScryCard {
+  return {
+    ...card,
+    image_uris: card.faceImages?.[i] ?? card.image_uris,
+    pt: card.pt && { ...card.pt, name: card.pt.faceNames?.[i] ?? card.pt.name, image_uris: card.pt.faceImages?.[i] ?? card.pt.image_uris },
+  };
+}
+
+/** Guarda a carta pelo nome completo e também pelo nome de cada face ("The Enigma Jewel", "Locus of Enlightenment"). */
 function cachePut(card: ScryCard) {
-  try { localStorage.setItem(CACHE_PREFIX + card.name.toLowerCase(), JSON.stringify(card)); } catch { /* cache cheio ou bloqueado */ }
+  try {
+    localStorage.setItem(CACHE_PREFIX + card.name.toLowerCase(), JSON.stringify(card));
+    card.faceNames?.forEach((fn, i) => {
+      if (fn && fn.toLowerCase() !== card.name.toLowerCase()) localStorage.setItem(CACHE_PREFIX + fn.toLowerCase(), JSON.stringify(faceView(card, i)));
+    });
+  } catch { /* cache cheio ou bloqueado */ }
 }
 
 /**
@@ -101,7 +140,8 @@ function cachePut(card: ScryCard) {
  * Cartas sem tradução ficam marcadas para não serem procuradas de novo; falha de rede não marca nada.
  */
 async function addPortuguese(cards: ScryCard[]) {
-  const todo = cards.filter(c => !c.ptChecked);
+  // Registros guardados pelo nome de uma face apontam para a carta inteira: a tradução é gravada nela.
+  const todo = [...new Map(cards.filter(c => !c.ptChecked).map(c => [c.name, cacheGet(c.name) ?? c])).values()];
   for (let i = 0; i < todo.length; i += 30) {
     const chunk = todo.slice(i, i + 30);
     const q = `lang:pt (${chunk.map(c => `!"${c.name.replace(/"/g, '')}"`).join(' or ')})`;
@@ -128,7 +168,7 @@ export async function fetchByNames(names: string[]): Promise<Map<string, ScryCar
   }
   for (let i = 0; i < missing.length; i += 75) {
     const chunk = missing.slice(i, i + 75);
-    const { json } = await request('/cards/collection', { identifiers: chunk.map(name => ({ name })) });
+    const { json } = await request('/cards/collection', { identifiers: chunk.map(name => ({ name: lookupName(name) })) });
     for (const d of json?.data ?? []) {
       const s = slim(d);
       cachePut(s);
@@ -163,7 +203,7 @@ export async function resolveCardNames(names: string[]): Promise<{ found: Map<st
   }
   for (let i = 0; i < todo.length; i += 75) {
     const chunk = todo.slice(i, i + 75);
-    const { json } = await request('/cards/collection', { identifiers: chunk.map(name => ({ name })) });
+    const { json } = await request('/cards/collection', { identifiers: chunk.map(name => ({ name: lookupName(name) })) });
     const byName = new Map<string, string>();
     for (const d of json?.data ?? []) {
       const s = slim(d);
