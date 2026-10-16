@@ -4,6 +4,7 @@ import { mountDeckBuilder } from './ui/deckbuilder';
 import { ForgeClient, FORGE_URL, type FState } from './forge/client';
 import { createForgeTableView } from './ui/forgeTable';
 import { deckArt, mountLobby } from './ui/lobby';
+import { enterLandscape, mountRotateGate } from './ui/landscape';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -63,10 +64,13 @@ const forgeTable = createForgeTableView(document.querySelector('#scrGame')!, {
   },
 });
 
+mountRotateGate();
+
 const lobby = mountLobby(document.querySelector('#scrLobby')!, {
-  onPlay: (you, opp) => void startMatch(you, opp),
-  onHost: (you, name, url) => void startNetMatch(you, url, { type: 'host', name, deck: forgeDeck(you) }),
-  onJoin: (you, name, code, url) => void startNetMatch(you, url, { type: 'join', code, name, deck: forgeDeck(you) }),
+  // Começar uma partida é o toque que permite tela cheia e trava em paisagem no celular.
+  onPlay: (you, opp) => { void enterLandscape(); void startMatch(you, opp); },
+  onHost: (you, name, url) => { void enterLandscape(); void startNetMatch(you, url, { type: 'host', name, deck: forgeDeck(you) }); },
+  onJoin: (you, name, code, url) => { void enterLandscape(); void startNetMatch(you, url, { type: 'join', code, name, deck: forgeDeck(you) }); },
   onCancelRoom: () => { leaveForge(); lobby.setStatus(''); },
   onDecks: () => show('decks'),
 });

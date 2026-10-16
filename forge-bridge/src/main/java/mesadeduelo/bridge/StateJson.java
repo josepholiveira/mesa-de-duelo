@@ -20,7 +20,9 @@ import forge.game.card.CardView.CardStateView;
 import forge.game.card.CounterType;
 import forge.game.combat.CombatView;
 import forge.game.keyword.KeywordView;
+import forge.game.player.Player;
 import forge.game.player.PlayerView;
+import forge.game.spellability.SpellAbility;
 import forge.game.spellability.StackItemView;
 import forge.game.zone.ZoneType;
 
@@ -47,6 +49,7 @@ final class StateJson {
         JsonArray players = new JsonArray();
         for (PlayerView p : gv.getPlayers()) players.add(player(p, viewer == -1 || viewer == p.getId(), game));
         o.add("players", players);
+        o.add("castable", castable(game, viewer));
 
         JsonArray stack = new JsonArray();
         if (gv.getStack() != null) {
@@ -182,6 +185,10 @@ final class StateJson {
         // Emblemas não têm texto Oracle: o texto vem das habilidades que o efeito carrega.
         o.addProperty("text", c.isEmblem() ? c.getText().replace("\r", "").trim() : s.getOracleText());
         if (c.isEmblem()) o.addProperty("emblem", true);
+        if (c.getZone() == ZoneType.Exile) {
+            Card gc = game == null ? null : game.findByView(c);
+            if (gc != null && gc.isPlotted()) o.addProperty("plotted", true);
+        }
         o.addProperty("creature", s.isCreature());
         o.addProperty("land", s.isLand());
         if (s.isPlaneswalker()) o.addProperty("planeswalker", true);
@@ -220,6 +227,33 @@ final class StateJson {
             o.add("counters", co);
         }
         return o;
+    }
+
+    /**
+     * Cartas fora da mão que o jogador pode usar agora: flashback e afins no cemitério; tramadas, foretell,
+     * Aventura e "você pode conjurar" no exílio (inclusive do exílio do oponente). O destaque do Forge
+     * (setWeaklySelectable) deixa várias de fora, as tramadas sempre. Só com prioridade; não confere a mana.
+     */
+    static JsonArray castable(Game game, int viewer) {
+        JsonArray ids = new JsonArray();
+        if (game == null || viewer < 0) return ids;
+        try {
+            Player me = null;
+            for (Player pl : game.getPlayers()) if (pl.getId() == viewer) me = pl;
+            if (me == null || !me.equals(game.getPhaseHandler().getPriorityPlayer())) return ids;
+            java.util.Set<Card> candidates = new java.util.LinkedHashSet<>();
+            for (Card c : me.getCardsActivatableInExternalZones(false)) {
+                if (c.isInZone(ZoneType.Graveyard) || c.isInZone(ZoneType.Exile)) candidates.add(c);
+            }
+            for (Card c : me.getCardsIn(ZoneType.Exile)) if (c.isPlotted()) candidates.add(c);
+            for (Card c : candidates) if (castableNow(c, me)) ids.add(c.getId());
+        } catch (RuntimeException e) { /* leitura concorrente com a thread do jogo: sem destaque desta vez */ }
+        return ids;
+    }
+
+    private static boolean castableNow(Card c, Player who) {
+        for (SpellAbility sa : c.getAllPossibleAbilities(who, true)) if (!sa.isManaAbility()) return true;
+        return false;
     }
 
     private static Map<CounterType, Integer> toMap(CardView c) {

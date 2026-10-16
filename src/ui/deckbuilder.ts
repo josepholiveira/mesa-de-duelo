@@ -1,7 +1,8 @@
 import { DEFAULT_DECKS, deckSize, isBasic, loadUserDecks, parseDeckList, saveUserDecks, type DeckData } from '../decks';
-import { cardInfo, type CardInfo, type CardType } from '../cards';
+import { cardInfo, type CardInfo, type CardType, type Color } from '../cards';
 import { cacheGet, fetchByNames, resolveCardNames, searchCards, type ScryCard } from '../scryfall';
-import { esc, manaHTML, richText } from './cardtext';
+import { esc, manaHTML, pip, richText } from './cardtext';
+import { deckArt, deckColors } from './lobby';
 
 const MAX_COPIES = 4;
 const NUMBERS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -18,6 +19,24 @@ const TYPE_PT: Record<CardType, string> = {
   artifact: 'Artefatos', enchantment: 'Encantamentos', battle: 'Batalhas', other: 'Outras', land: 'Terrenos',
 };
 const TYPE_ORDER = Object.keys(TYPE_PT) as CardType[];
+const COLORS: Color[] = ['W', 'U', 'B', 'R', 'G'];
+const COLOR_NAME: Record<Color, string> = { W: 'Branco', U: 'Azul', B: 'Preto', R: 'Vermelho', G: 'Verde' };
+/** Atalhos de tipo na busca de cartas: rótulo e o filtro do Scryfall. */
+const TYPE_FILTERS: [string, string][] = [
+  ['Criatura', 't:creature'], ['Instantânea', 't:instant'], ['Feitiço', 't:sorcery'], ['Artefato', 't:artifact'],
+  ['Encantamento', 't:enchantment'], ['Planeswalker', 't:planeswalker'], ['Terreno', 't:land'],
+];
+/** Faixas da curva de mana: 0, 1, … 5 e "6+". */
+const CURVE = ['0', '1', '2', '3', '4', '5', '6+'];
+
+const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}" fill="currentColor"/></svg>`;
+const ICON_BACK = icon('M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z');
+const ICON_PLUS = icon('M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z');
+const ICON_IMPORT = icon('M5 20h14v-2H5zm7-3 5-5-1.4-1.4-2.6 2.6V4h-2v9.2l-2.6-2.6L7 12z');
+const ICON_COPY = icon('M8 3h11a2 2 0 0 1 2 2v11h-2V5H8zM5 7h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm0 2v10h10V9z');
+const ICON_TRASH = icon('M9 3h6l1 1h4v2H4V4h4zM6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2zm4 2v9h1.5v-9zm2.5 0v9H14v-9z');
+const ICON_SEARCH = icon('M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z');
+const ICON_LOCK = icon('M12 2a5 5 0 0 1 5 5v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v3h6V7a3 3 0 0 0-3-3z');
 
 export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onChange(): void }) {
   let user = loadUserDecks();
@@ -37,25 +56,48 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   let importDraft = { name: '', text: '' };
   /** Aviso mostrado no deck recém-importado (cartas não encontradas, sideboard ignorado). */
   let importReport: { id: string; missing: string; info: string } | null = null;
+  /** Filtro da lista de decks e atalhos da busca de cartas. */
+  let listQuery = '';
+  const searchColors = new Set<Color>();
+  let searchType = '';
+  let standardOnly = false;
 
   root.innerHTML = `
   <div class="builder">
     <header class="builder-head">
-      <button class="arena-btn secondary" data-b="back">← Início</button>
-      <h1>Decks</h1>
+      <button class="ghost-btn" data-b="back">${ICON_BACK}<span>Início</span></button>
+      <h1>Gerenciar decks</h1>
+      <div class="builder-actions">
+        <button class="ghost-btn" data-b="import">${ICON_IMPORT}<span>Importar lista</span></button>
+        <button class="arena-btn primary" data-b="new">${ICON_PLUS}Novo deck</button>
+      </div>
     </header>
     <div class="builder-grid">
-      <aside class="panel-box deck-list"><h2>Seus decks</h2><ul id="bDecks"></ul><button class="arena-btn secondary" data-b="new">Novo deck</button>
-        <button class="arena-btn secondary" data-b="import">Importar lista</button></aside>
-      <section class="panel-box deck-edit" id="bEdit"></section>
-      <section class="panel-box search">
-        <h2>Buscar cartas no Scryfall</h2>
+      <aside class="panel-box deck-list" aria-label="Decks">
+        <label class="list-search">${ICON_SEARCH}<input id="bListQuery" type="search" placeholder="Buscar deck" autocomplete="off" aria-label="Buscar deck"></label>
+        <div id="bDecks"></div>
+      </aside>
+      <section class="panel-box deck-edit" id="bEdit" aria-label="Deck"></section>
+      <section class="panel-box card-search" aria-label="Adicionar cartas">
+        <h2>Adicionar cartas</h2>
         <form id="bForm" class="search-form">
-          <input id="bQuery" type="search" placeholder="ex.: t:creature c:g cmc<=3" autocomplete="off" aria-label="Busca">
+          <label class="list-search">${ICON_SEARCH}<input id="bQuery" type="search" placeholder="Nome, texto ou busca do Scryfall" autocomplete="off" aria-label="Buscar cartas"></label>
           <button class="arena-btn primary">Buscar</button>
         </form>
-        <p class="tips">Sintaxe do Scryfall: <code>c:r</code> cor, <code>t:instant</code> tipo, <code>cmc&lt;=2</code> custo,
-          <code>s:fdn</code> coleção, <code>o:"draw a card"</code> texto.</p>
+        <div class="search-filters">
+          <div class="color-filter" role="group" aria-label="Cores">
+            ${COLORS.map(c => `<button type="button" class="cf" data-scolor="${c}" aria-pressed="false" title="${COLOR_NAME[c]}">${pip(c)}</button>`).join('')}
+          </div>
+          <div class="type-chips" role="group" aria-label="Tipo">
+            ${TYPE_FILTERS.map(([label, f]) => `<button type="button" class="chip" data-stype="${f}" aria-pressed="false">${label}</button>`).join('')}
+            <button type="button" class="chip" data-sstd aria-pressed="false" title="Só cartas legais no Standard">Standard</button>
+          </div>
+        </div>
+        <details class="tips">
+          <summary>Dicas de busca</summary>
+          <p>Use a sintaxe do Scryfall: <code>c:r</code> cor, <code>t:instant</code> tipo, <code>cmc&lt;=2</code> custo,
+          <code>s:fdn</code> coleção, <code>o:"draw a card"</code> texto. As cores marcadas mostram cartas só dessas cores (e incolores).</p>
+        </details>
         <div id="bResults" class="results"></div>
       </section>
     </div>
@@ -69,14 +111,33 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   function save() { saveUserDecks(user); opts.onChange(); }
 
   function renderList() {
-    const item = (d: DeckData) => `<li><button class="deck-item ${d.id === selected ? 'on' : ''}" data-select="${d.id}">
-      <span>${esc(d.name)}</span><small>${deckSize(d)}${d.builtin ? ' · padrão' : ''}</small></button></li>`;
-    $('#bDecks').innerHTML = [...DEFAULT_DECKS, ...user].map(item).join('');
+    const q = listQuery.toLowerCase();
+    const match = (d: DeckData) => !q || d.name.toLowerCase().includes(q);
+    const item = (d: DeckData) => {
+      const art = deckArt(d);
+      return `<li><button class="deck-item ${d.id === selected ? 'on' : ''}" data-select="${d.id}" aria-current="${d.id === selected}">
+        <span class="di-cover"${art ? ` style="background-image:url('${art}')"` : ''}></span>
+        <span class="di-info">
+          <span class="di-name">${esc(d.name)}</span>
+          <span class="di-meta">${deckColors(d).map(pip).join('')}<span>${deckSize(d)} cartas</span></span>
+        </span>
+      </button></li>`;
+    };
+    const mine = user.filter(match), ready = DEFAULT_DECKS.filter(match);
+    $('#bDecks').innerHTML = `
+      <h2>Meus decks <small>${user.length}</small></h2>
+      ${mine.length ? `<ul>${mine.map(item).join('')}</ul>` : user.length ? '<p class="note">Nenhum deck seu com esse nome.</p>' : `
+        <div class="list-empty">
+          <p>Você ainda não tem decks.</p>
+          <p class="note">Crie um do zero, importe uma lista ou duplique um deck pronto.</p>
+        </div>`}
+      <h2>Decks prontos <small>${DEFAULT_DECKS.length}</small></h2>
+      ${ready.length ? `<ul>${ready.map(item).join('')}</ul>` : '<p class="note">Nenhum deck pronto com esse nome.</p>'}`;
   }
 
   function renderImport() {
     $('#bEdit').innerHTML = `
-      <div class="edit-head"><h2>Importar lista</h2></div>
+      <div class="edit-title"><h2>Importar lista</h2></div>
       <form id="bImport" class="import-form">
         <input id="bImpName" class="name-input" placeholder="Nome do deck" value="${esc(importDraft.name)}" aria-label="Nome do deck">
         <textarea id="bImpText" rows="16" spellcheck="false" aria-label="Lista do deck"
@@ -136,56 +197,114 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
       const k = def?.type ?? 'unknown';
       groups.set(k, [...(groups.get(k) ?? []), { e, def }]);
     }
+    const countOf = (k: string) => (groups.get(k) ?? []).reduce((s, r) => s + r.e.count, 0);
     const section = (k: string, label: string) => {
       const rows = groups.get(k);
       if (!rows?.length) return '';
-      const n = rows.reduce((s, r) => s + r.e.count, 0);
-      return `<h3>${label} <small>${n}</small></h3><ul class="entries">${rows
+      return `<section class="entry-group"><h3>${label} <small>${countOf(k)}</small></h3><ul class="entries">${rows
         .sort((a, b) => (a.def?.cmc ?? 0) - (b.def?.cmc ?? 0) || a.e.name.localeCompare(b.e.name))
-        .map(({ e, def }) => `<li class="entry" data-hover="${esc(e.name)}">
-          <span class="count">${e.count}</span>
+        .map(({ e, def }) => {
+          const full = e.count >= maxCopies(e.name);
+          return `<li class="entry" data-hover="${esc(e.name)}">
+          <span class="e-art"${def?.artCrop ? ` style="background-image:url('${def.artCrop}')"` : ''}></span>
           <span class="ename" title="${esc(e.name)}">${esc(def?.label ?? e.name)}</span>
           <span class="ecost">${def ? manaHTML(def.manaCost) : ''}</span>
-          ${ro ? '' : `<button class="mini" data-dec="${esc(e.name)}" aria-label="Remover uma">−</button><button class="mini" data-inc="${esc(e.name)}" aria-label="Adicionar uma">+</button>`}
-        </li>`).join('')}</ul>`;
+          ${ro ? `<span class="count">${e.count}</span>` : `<span class="stepper">
+            <button class="mini" data-dec="${esc(e.name)}" aria-label="Remover uma ${esc(def?.label ?? e.name)}">−</button>
+            <span class="count">${e.count}</span>
+            <button class="mini" data-inc="${esc(e.name)}" aria-label="Adicionar uma ${esc(def?.label ?? e.name)}" ${full ? 'disabled' : ''}>+</button>
+          </span>`}
+        </li>`;
+        }).join('')}</ul></section>`;
     };
     const size = deckSize(d);
+    const art = deckArt(d);
+    // Curva de mana das cartas que não são terreno.
+    const curve = CURVE.map(() => 0);
+    for (const e of d.cards) {
+      const def = defOf(e.name);
+      if (def && def.type !== 'land') curve[Math.min(6, Math.round(def.cmc))] += e.count;
+    }
+    const peak = Math.max(1, ...curve);
+    const lands = countOf('land');
+    const creatures = countOf('creature');
+    const spells = size - lands - creatures - countOf('unknown');
     $('#bEdit').innerHTML = `
-      <div class="edit-head">
-        ${ro ? `<h2>${esc(d.name)}</h2>` : `<input id="bName" class="name-input" value="${esc(d.name)}" aria-label="Nome do deck">`}
-        <span class="size ${size < 40 ? 'short' : ''}">${size} cartas</span>
-      </div>
-      <div class="edit-actions">
-        <button class="arena-btn secondary" data-b="dup">Duplicar</button>
-        ${ro ? '<span class="note">Deck padrão: duplique para editar.</span>' : '<button class="arena-btn secondary danger" data-b="del">Excluir</button>'}
-      </div>
+      <header class="edit-hero"${art ? ` style="--cover:url('${art}')"` : ''}>
+        <div class="edit-title">
+          ${ro ? `<h2>${esc(d.name)}</h2>` : `<input id="bName" class="name-input" value="${esc(d.name)}" aria-label="Nome do deck" maxlength="40">`}
+          <p class="edit-meta">${deckColors(d).map(pip).join('')}<span class="size ${size < 40 ? 'short' : ''}">${size} cartas</span>
+            <span>${ro ? 'Deck pronto' : 'Seu deck'}</span></p>
+        </div>
+        <div class="edit-actions">
+          <button class="ghost-btn" data-b="dup">${ICON_COPY}<span>Duplicar</span></button>
+          ${ro ? '' : `<button class="ghost-btn danger" data-b="del">${ICON_TRASH}<span>Excluir</span></button>`}
+        </div>
+      </header>
+      ${ro ? `<div class="ro-banner">${ICON_LOCK}<span>Decks prontos não podem ser alterados.</span>
+        <button class="arena-btn primary" data-b="dup">Duplicar para editar</button></div>` : ''}
       ${importReport?.id === d.id && importReport.missing ? `<p class="note error">${esc(importReport.missing)}</p>` : ''}
       ${importReport?.id === d.id && importReport.info ? `<p class="note">${esc(importReport.info)}</p>` : ''}
-      ${size < 40 ? '<p class="note">Recomendado: pelo menos 40 cartas, cerca de 17 terrenos.</p>' : ''}
-      ${TYPE_ORDER.map(k => section(k, TYPE_PT[k])).join('')}
-      ${section('unknown', 'Carregando…')}`;
+      ${size && countOf('unknown') ? '<p class="note">Carregando as cartas…</p>' : size ? `<div class="deck-stats">
+        <div class="stat-chips">
+          <span class="stat"><b>${creatures}</b> criaturas</span>
+          <span class="stat"><b>${spells}</b> outras mágicas</span>
+          <span class="stat"><b>${lands}</b> terrenos</span>
+        </div>
+        <div class="curve" aria-label="Curva de mana">
+          ${curve.map((n, i) => `<span class="bar" title="${n} carta(s) de custo ${CURVE[i]}"><b>${n || ''}</b><i style="height:${(n / peak) * 100}%"></i><small>${CURVE[i]}</small></span>`).join('')}
+        </div>
+      </div>` : `<div class="list-empty edit-empty">
+        <p>Deck vazio.</p>
+        <p class="note">Busque cartas ao lado e toque em <b>+</b> para adicionar. Um deck costuma ter 60 cartas, com uns 24 terrenos.</p>
+      </div>`}
+      ${size && size < 40 ? '<p class="note warn">Recomendado: pelo menos 40 cartas, cerca de 17 terrenos.</p>' : ''}
+      <div class="entry-groups">
+        ${TYPE_ORDER.map(k => section(k, TYPE_PT[k])).join('')}
+        ${section('unknown', 'Carregando…')}
+      </div>`;
   }
 
   function renderResults() {
     const el = $('#bResults');
     if (searching && !results.length) { el.innerHTML = '<p class="note">Buscando…</p>'; return; }
     if (error) { el.innerHTML = `<p class="note error">${esc(error)}</p>`; return; }
-    if (!query) { el.innerHTML = '<p class="note">Digite uma busca para encontrar cartas.</p>'; return; }
+    if (!fullQuery()) {
+      el.innerHTML = `<div class="list-empty"><p>Encontre cartas para o deck.</p>
+        <p class="note">Digite um nome (em inglês ou português) ou escolha cores e um tipo acima.</p></div>`;
+      return;
+    }
     const d = current();
     const tiles = results.map(sc => ({ sc, def: cardInfo(sc) })).map(({ sc, def }) => {
       const have = d.cards.find(e => e.name === sc.name)?.count ?? 0;
-      const full = have >= maxCopies(sc.name, sc);
-      const disabled = d.builtin || full;
-      return `<div class="result" data-hover="${esc(sc.name)}">
-        ${def.imageSmall ? `<img src="${def.imageSmall}" alt="${esc(def.label)}" loading="lazy">` : `<div class="noimg">${esc(def.label)}</div>`}
-        <div class="r-foot">
-          <button class="mini add" data-add="${esc(sc.name)}" ${disabled ? 'disabled' : ''}>${have ? `+ (${have})` : '+ Adicionar'}</button>
-        </div>
+      const max = maxCopies(sc.name, sc);
+      return `<div class="result${have ? ' in-deck' : ''}" data-hover="${esc(sc.name)}">
+        <button class="r-img" data-add="${esc(sc.name)}" ${d.builtin || have >= max ? 'disabled' : ''} aria-label="Adicionar ${esc(def.label)}">
+          ${def.imageSmall ? `<img src="${def.imageSmall}" alt="" loading="lazy">` : `<span class="noimg">${esc(def.label)}</span>`}
+          ${have ? `<span class="r-have">${have}${max < 99 ? `/${max}` : ''}</span>` : ''}
+        </button>
+        ${d.builtin ? '' : `<div class="r-foot">
+          <button class="mini" data-dec="${esc(sc.name)}" ${have ? '' : 'disabled'} aria-label="Remover uma">−</button>
+          <span class="r-label" title="${esc(def.label)}">${esc(def.label)}</span>
+          <button class="mini" data-add="${esc(sc.name)}" ${have >= max ? 'disabled' : ''} aria-label="Adicionar uma">+</button>
+        </div>`}
       </div>`;
     }).join('');
-    el.innerHTML = `<p class="note">${total} resultado(s).</p>
-      <div class="result-grid">${tiles}</div>
-      ${hasMore ? `<button class="arena-btn secondary" data-b="more" ${searching ? 'disabled' : ''}>${searching ? 'Carregando…' : 'Mais resultados'}</button>` : ''}`;
+    el.innerHTML = `<p class="note">${total} carta(s)${d.builtin ? ' · duplique o deck para adicionar' : ' · toque na carta para adicionar'}</p>
+      ${results.length ? `<div class="result-grid">${tiles}</div>` : ''}
+      ${hasMore ? `<button class="arena-btn secondary more-btn" data-b="more" ${searching ? 'disabled' : ''}>${searching ? 'Carregando…' : 'Mais resultados'}</button>` : ''}`;
+  }
+
+  /** Texto digitado mais os atalhos de cor, tipo e formato. */
+  function fullQuery() {
+    return [query, searchColors.size ? `id<=${COLORS.filter(c => searchColors.has(c)).join('').toLowerCase()}` : '',
+      searchType, standardOnly ? 'f:standard' : ''].filter(Boolean).join(' ');
+  }
+
+  function renderFilters() {
+    root.querySelectorAll<HTMLElement>('[data-scolor]').forEach(b => b.setAttribute('aria-pressed', String(searchColors.has(b.dataset.scolor as Color))));
+    root.querySelectorAll<HTMLElement>('[data-stype]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.stype === searchType)));
+    root.querySelector('[data-sstd]')!.setAttribute('aria-pressed', String(standardOnly));
   }
 
   function render() { renderList(); renderEdit(); renderResults(); }
@@ -196,17 +315,23 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     try { await fetchByNames(missing); renderEdit(); } catch { /* sem rede: lista continua com nomes */ }
   }
 
+  /** Cada busca ganha um número; a resposta de uma busca já substituída por outra é descartada. */
+  let searchSeq = 0;
   async function runSearch(more = false) {
-    if (!query) return;
+    const q = fullQuery();
+    const seq = ++searchSeq;
+    if (!q) { results = []; searching = false; error = ''; renderResults(); return; }
     searching = true; error = '';
     if (!more) { results = []; page = 1; }
     renderResults();
     try {
-      const r = await searchCards(query, page);
+      const r = await searchCards(q, page);
+      if (seq !== searchSeq) return;
       results = more ? [...results, ...r.cards] : r.cards;
       hasMore = r.hasMore; total = r.total;
       page++;
     } catch (e) {
+      if (seq !== searchSeq) return;
       error = `Não foi possível buscar: ${(e as Error).message}`;
     }
     searching = false;
@@ -226,9 +351,16 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
 
   root.addEventListener('click', e => {
     const t = e.target as HTMLElement;
-    const btn = t.closest<HTMLElement>('[data-b],[data-select],[data-inc],[data-dec],[data-add]');
-    if (!btn) return;
+    const btn = t.closest<HTMLElement>('[data-b],[data-select],[data-inc],[data-dec],[data-add],[data-scolor],[data-stype],[data-sstd]');
+    if (!btn || (btn as HTMLButtonElement).disabled) return;
     const ds = btn.dataset;
+    if (ds.scolor) {
+      const c = ds.scolor as Color;
+      if (searchColors.has(c)) searchColors.delete(c); else searchColors.add(c);
+      renderFilters(); void runSearch(); return;
+    }
+    if (ds.stype) { searchType = searchType === ds.stype ? '' : ds.stype; renderFilters(); void runSearch(); return; }
+    if ('sstd' in ds) { standardOnly = !standardOnly; renderFilters(); void runSearch(); return; }
     if (ds.select) { selected = ds.select; importing = false; importReport = null; render(); void ensureDefs(); return; }
     if (ds.inc) return change(ds.inc, 1);
     if (ds.dec) return change(ds.dec, -1);
@@ -239,7 +371,9 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
       case 'import-cancel': importing = false; importError = ''; renderEdit(); break;
       case 'new': {
         const d: DeckData = { id: crypto.randomUUID(), name: 'Novo deck', cards: [] };
+        importing = false; importReport = null;
         user.push(d); selected = d.id; save(); render();
+        (root.querySelector('#bName') as HTMLInputElement | null)?.select();
         break;
       }
       case 'dup': {
@@ -272,6 +406,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   });
   root.addEventListener('input', e => {
     const t = e.target as HTMLInputElement;
+    if (t.id === 'bListQuery') { listQuery = t.value.trim(); renderList(); }
     if (t.id === 'bImpText') importDraft.text = t.value;
     if (t.id === 'bImpName') importDraft.name = t.value;
   });
@@ -289,7 +424,14 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   });
   root.addEventListener('pointerleave', () => { $('#bPreview').hidden = true; hover = null; });
 
+  /** Cartas de todos os decks, para a lista mostrar capa e cores de cada um. */
+  function loadCovers() {
+    const names = [...DEFAULT_DECKS, ...user].flatMap(d => d.cards.map(c => c.name)).filter(n => !cacheGet(n));
+    if (names.length) fetchByNames(names).then(renderList).catch(() => { /* sem rede: lista sem capas */ });
+  }
+
   render();
   void ensureDefs();
-  return { refresh() { user = loadUserDecks(); render(); } };
+  loadCovers();
+  return { refresh() { user = loadUserDecks(); render(); loadCovers(); } };
 }

@@ -57,6 +57,9 @@ public final class Main {
             // A mesa só mostra campo de batalha e mão como cartas clicáveis. Com isto desligado, escolhas
             // no grimório, cemitério ou exílio (buscar no grimório, reanimar...) chegam como pergunta com as cartas.
             prefs.setPref(FPref.UI_SELECT_FROM_CARD_DISPLAYS, "false");
+            // Como no Arena: com a pilha ou a fase sem nada que o jogador possa fazer (nenhuma carta jogável
+            // nem habilidade pagável, sem contar as de mana), a prioridade passa sozinha em vez de pedir OK.
+            prefs.setPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, "true");
             return null;
         });
         System.out.printf("Forge inicializado em %d ms%n", System.currentTimeMillis() - t0);

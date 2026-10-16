@@ -64,6 +64,20 @@ async function request(path: string, body?: unknown): Promise<{ status: number; 
 }
 
 const images = (u: any): Images | undefined => u && { small: u.small, normal: u.normal, art_crop: u.art_crop };
+/**
+ * Arte fixa dos terrenos básicos: série de Magali Villeneuve em Dominaria United (DMU 277–281, arte cheia).
+ * Vale em todas as telas, inclusive no lugar da impressão em português.
+ */
+const BASIC_ART: Record<string, string> = { plains: '277', island: '278', swamp: '279', mountain: '280', forest: '281' };
+const basicImages = (num: string): Images => {
+  const url = (version: string) => `${API}/cards/dmu/${num}?format=image&version=${version}`;
+  return { small: url('small'), normal: url('normal'), art_crop: url('art_crop') };
+};
+function withBasicArt(c: ScryCard): ScryCard {
+  const num = BASIC_ART[c.name.toLowerCase()];
+  return num ? { ...c, image_uris: basicImages(num), pt: c.pt && { ...c.pt, image_uris: undefined } } : c;
+}
+
 /** O /cards/collection não acha "Frente // Verso" (nem cartas divididas como "Fire // Ice"), só o nome da frente. */
 const lookupName = (name: string) => name.split(' // ')[0];
 const noScan = (c: any) => c.image_status === 'placeholder' || c.image_status === 'missing';
@@ -112,7 +126,7 @@ export function cacheGet(name: string): ScryCard | null {
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + name.toLowerCase());
     const c: ScryCard | null = raw ? JSON.parse(raw) : null;
-    return c && c.faces && c.v !== FORMAT ? null : c;
+    return !c || (c.faces && c.v !== FORMAT) ? null : withBasicArt(c);
   } catch { return null; }
 }
 
@@ -186,7 +200,7 @@ export async function searchCards(q: string, page = 1): Promise<{ cards: ScryCar
   const cards: ScryCard[] = (json.data ?? []).map(slim);
   cards.forEach(cachePut);
   await addPortuguese(cards);
-  return { cards, hasMore: !!json.has_more, total: json.total_cards ?? cards.length };
+  return { cards: cards.map(withBasicArt), hasMore: !!json.has_more, total: json.total_cards ?? cards.length };
 }
 
 /**

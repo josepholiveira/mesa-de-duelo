@@ -3,6 +3,7 @@ import { cacheGet, fetchByNames } from '../scryfall';
 import { esc, manaHTML, pip, richText } from './cardtext';
 import { colorFromCost, faceHTML } from './face';
 import { createMotion } from './motion';
+import { canFullscreen, toggleFullscreen } from './landscape';
 
 /** Fases do Forge agrupadas nas sete etapas mostradas na lateral. */
 const PHASE_GROUP: Record<string, string> = {
@@ -75,6 +76,9 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     <div class="topbar">
       <button class="icon-btn" data-ui="menu" aria-label="Menu">☰</button>
       <button class="icon-btn" data-ui="log">Registro</button>
+      <button class="icon-btn fs-btn" data-ui="fullscreen" aria-label="Tela cheia" title="Tela cheia"${canFullscreen() ? '' : ' hidden'}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="fs-enter" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path class="fs-exit" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+      </button>
       <span class="room-tag" id="fRoomTag" hidden></span>
     </div>
     <div class="menu" id="fMenu" hidden>
@@ -118,6 +122,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   let portraits: [string | undefined, string | undefined] = [undefined, undefined];
   let lastTurn = 0;
   let zoneOf: number | null = null;
+  let zoneKind: 'gy' | 'exile' = 'gy';
   let bannerTimer = 0;
   const motion = createMotion(root);
   let lastLife = new Map<number, number>();
@@ -125,6 +130,12 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   let disconnected = false;
   /** Versão do prompt em que o jogador já clicou num botão; evita clique duplo até o Forge responder. */
   let clickedGen = -1;
+  /**
+   * Quando foi esse clique. Se o Forge recusar a ação (bloqueio inválido, por exemplo), o prompt não muda;
+   * a ponte libera os botões depois de 1,5 s e a mesa também, senão o OK ficaria travado para sempre.
+   */
+  let clickedAt = 0;
+  const CLICK_LOCK_MS = 1600;
   /** Marcador com o balão aberto por clique (id da carta e tipo), até clicar fora. */
   let openCounter: string | null = null;
   /** Seleção em andamento na pergunta aberta. */
@@ -174,6 +185,20 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   /** Destaque azul: cartas que o Forge marca como selecionáveis no prompt atual ou utilizáveis agora. */
   function usable(s: FState, id: number) {
     return s.input.selectable.includes(id) || !!s.input.actionable?.includes(id);
+  }
+  /** Cemitério e exílio: além do que o Forge marca, o que a ponte diz que dá para usar agora (flashback, tramadas...). */
+  const canUse = (s: FState, c: FCard) => usable(s, c.id) || (!s.question && !!s.castable?.includes(c.id));
+
+  /** Cartas de fora da mão que dá para usar agora, com a etiqueta de onde vêm; aparecem na ponta da mão. */
+  function outsideHand(s: FState) {
+    if (s.question || !s.castable?.length) return [];
+    const out: { c: FCard; tag: string }[] = [];
+    for (const p of s.players) {
+      const mine = p.id === s.you;
+      for (const c of p.graveyard) if (canUse(s, c)) out.push({ c, tag: mine ? 'Cemitério' : `Cemitério de ${p.name}` });
+      for (const c of p.exile) if (canUse(s, c)) out.push({ c, tag: c.plotted ? 'Tramada' : mine ? 'Exílio' : `Exílio de ${p.name}` });
+    }
+    return out;
   }
 
   function combatIndex(s: FState, id: number): { attack?: number; block?: number } {
@@ -297,9 +322,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
   /** Cartas de uma fileira, sem as auras/equipamentos (que vão desenhados junto da carta a que estão presos). */
   function fieldRow(s: FState, cards: FCard[]) {
-    const atts = attachmentsOf(s);
     const byId = battlefieldById(s);
-    return cards.filter(c => c.attachedTo == null || !byId.has(c.attachedTo)).map(c => bfCard(s, c, atts.get(c.id))).join('');
+    return stacks(s, cards.filter(c => c.attachedTo == null || !byId.has(c.attachedTo)));
   }
 
   /** Fileira de trás: terrenos e artefatos/encantamentos que não são criaturas (nem planeswalkers ou batalhas). */
@@ -308,16 +332,22 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return !!c.land || /\b(Artifact|Enchantment)\b/i.test(c.typeLine ?? '');
   }
 
-  /** Empilha cópias iguais (mesmo nome, estado e marcadores); cartas com algo preso ficam sozinhas. */
+  /**
+   * Empilha cópias iguais: mesmo nome, estado, marcadores e, nas criaturas, mesmo P/T, dano, palavras-chave
+   * e enjoo. Cartas com algo preso ou envolvidas no combate ficam sozinhas.
+   */
   function stacks(s: FState, cards: FCard[]) {
     const atts = attachmentsOf(s);
     const groups = new Map<string, FCard[]>();
     for (const c of cards) {
       const ctr = Object.entries(c.counters ?? {}).filter(([, v]) => v).sort().join(',');
-      const k = atts.has(c.id) || c.faceDown ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}|${c.token}|${c.copyOf ?? ''}|${ctr}`;
+      const ci = combatIndex(s, c.id);
+      const alone = atts.has(c.id) || c.faceDown || c.attacking || c.blocking || ci.attack || ci.block || s.combat.some(x => x.defender === c.id);
+      const body = c.creature ? `|${c.power}/${c.toughness}|${c.damage ?? 0}|${[...(c.keywords ?? [])].sort()}|${!!c.sick}` : '';
+      const k = alone ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}|${c.token}|${c.copyOf ?? ''}|${ctr}${body}`;
       groups.set(k, [...(groups.get(k) ?? []), c]);
     }
-    return [...groups.values()].map(cs => `<div class="stack">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}${
+    return [...groups.values()].map(cs => `<div class="stack" style="--n:${cs.length}">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}${
       cs.length > 1 ? `<span class="stack-n" aria-hidden="true">×${cs.length}</span>` : ''}</div>`).join('');
   }
 
@@ -333,14 +363,17 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const cls = ['avatar', idx === 0 ? 'me' : 'opp'];
     if (s.activePlayer === p.id && !s.gameOver) cls.push('active');
     if (p.life < (lastLife.get(p.id) ?? p.life)) cls.push('hit');
-    const pool = Object.entries(p.pool).flatMap(([c, n]) => Array(n).fill(pip(c))).join('');
+    // Pagando um custo: cada símbolo da sua reserva vira um botão que gasta aquela mana.
+    const spend = p.id === s.you && !!s.input.paying;
+    const pool = Object.entries(p.pool).flatMap(([c, n]) => Array(n).fill(spend
+      ? `<button class="pool-mana" data-mana="${c}" aria-label="Usar mana ${c} da reserva">${pip(c)}</button>` : pip(c))).join('');
     const art = portraits[idx];
     const offline = s.room?.players.find(rp => rp.name === p.name)?.connected === false;
     return `<div class="${cls.join(' ')}" data-pid="${p.id}" role="button" tabindex="0" aria-label="${esc(p.name)}, ${p.life} de vida${offline ? ', desconectado' : ''}">
       <div class="portrait" ${art ? `style="background-image:url('${art}')"` : ''}></div>
       <div class="life">${p.life}</div>
       <div class="pname">${esc(p.name)}</div>
-      ${pool ? `<div class="pool">${pool}</div>` : ''}
+      ${pool ? `<div class="pool${spend ? ' spend' : ''}">${pool}</div>` : ''}
       ${emblems(p)}
       ${offline ? '<div class="offline">desconectado</div>' : ''}
     </div>`;
@@ -356,20 +389,30 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }).join('')}</div>`;
   }
 
-  function piles(p: FPlayer) {
+  function piles(s: FState, p: FPlayer) {
     const top = p.graveyard[p.graveyard.length - 1];
+    const gyLive = p.graveyard.some(c => canUse(s, c)) ? ' actionable' : '';
+    // Exílio só aparece com cartas: é onde ficam as tramadas (plot), as de Aventura e afins, que dá para conjurar dali.
+    const ex = p.exile[p.exile.length - 1];
+    const exLive = p.exile.some(c => canUse(s, c)) ? ' actionable' : '';
+    const exile = ex ? `<div class="pile gy exile${exLive}" data-gy="${p.id}" data-zone="exile" role="button" tabindex="0" title="Exílio" aria-label="Ver exílio de ${esc(p.name)} (${p.exile.length})"><div class="gy-top" data-peek="${ex.id}">${face(ex, 'small')}</div><span>${p.exile.length}</span></div>` : '';
     return `<div class="pile lib" title="Grimório"><div class="back"></div><span>${p.library}</span></div>
-      <div class="pile gy" data-gy="${p.id}" role="button" tabindex="0" title="Cemitério" aria-label="Ver cemitério de ${esc(p.name)} (${p.graveyard.length})">${top ? `<div class="gy-top" data-peek="${top.id}">${face(top, 'small')}</div>` : '<div class="gy-empty"></div>'}<span>${p.graveyard.length}</span></div>`;
+      <div class="pile gy${gyLive}" data-gy="${p.id}" data-zone="gy" role="button" tabindex="0" title="Cemitério" aria-label="Ver cemitério de ${esc(p.name)} (${p.graveyard.length})">${top ? `<div class="gy-top" data-peek="${top.id}">${face(top, 'small')}</div>` : '<div class="gy-empty"></div>'}<span>${p.graveyard.length}</span></div>${exile}`;
   }
 
   function zoneView(s: FState) {
     const el = $('#fZone');
     const p = s.players.find(pl => pl.id === zoneOf);
     if (!p) { el.hidden = true; zoneOf = null; return; }
-    const cards = [...p.graveyard].reverse();
-    el.innerHTML = `<div class="question zone-view" role="dialog" aria-modal="true" aria-label="Cemitério">
-      <h2>Cemitério · ${esc(p.name)} (${cards.length})</h2>
-      ${cards.length ? `<div class="q-opts cards">${cards.map(c => `<div class="q-face" data-peek="${c.id}">${face(c, 'normal')}</div>`).join('')}</div>` : '<p class="q-hint">Vazio.</p>'}
+    const title = zoneKind === 'exile' ? 'Exílio' : 'Cemitério';
+    const cards = [...(zoneKind === 'exile' ? p.exile : p.graveyard)].reverse();
+    // Carta que dá para usar agora (conjurar uma tramada, flashback...) fica clicável e com o brilho azul.
+    const card = (c: FCard) => canUse(s, c)
+      ? `<div class="q-face actionable" data-fid="${c.id}" role="button" tabindex="0" aria-label="Usar ${esc(label(c))}">${face(c, 'normal')}</div>`
+      : `<div class="q-face" data-peek="${c.id}">${face(c, 'normal')}${c.plotted ? '<div class="zone-tag">Tramada</div>' : ''}</div>`;
+    el.innerHTML = `<div class="question zone-view" role="dialog" aria-modal="true" aria-label="${title}">
+      <h2>${title} · ${esc(p.name)} (${cards.length})</h2>
+      ${cards.length ? `<div class="q-opts cards">${cards.map(card).join('')}</div>` : '<p class="q-hint">Vazio.</p>'}
       <div class="q-actions"><button class="arena-btn secondary" data-ui="zone-close">Fechar</button></div>
     </div>`;
     el.hidden = false;
@@ -387,7 +430,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function buttons(s: FState) {
     if (s.gameOver || s.question) return '';
     const { ok, cancel } = s.input;
-    const waiting = clickedGen === s.input.gen;
+    const waiting = clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS;
     const b = (act: string, btn: { label: string; enabled: boolean }, kind: string) =>
       btn.label ? `<button class="arena-btn ${kind}" data-act="${act}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
     const mine = s.activePlayer === s.you;
@@ -466,21 +509,25 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }).join('');
     $('#fOppAvatar').innerHTML = avatar(s, opp, 1);
     $('#fMeAvatar').innerHTML = avatar(s, me, 0);
-    $('#fOppPiles').innerHTML = piles(opp);
-    $('#fMePiles').innerHTML = piles(me);
+    $('#fOppPiles').innerHTML = piles(s, opp);
+    $('#fMePiles').innerHTML = piles(s, me);
     $('#fOppLands').innerHTML = backRow(s, opp);
     $('#fMeLands').innerHTML = backRow(s, me);
     $('#fOppCreatures').innerHTML = fieldRow(s, opp.battlefield.filter(c => !isBackRow(c)));
     $('#fMeCreatures').innerHTML = fieldRow(s, me.battlefield.filter(c => !isBackRow(c)));
 
-    const n = me.hand.length;
-    $('#fHand').innerHTML = me.hand.map((c, i) => {
+    // Na ponta da mão, as cartas do cemitério e do exílio que dá para usar agora, cada uma com a etiqueta da zona.
+    const extra = outsideHand(s);
+    const fan = [...me.hand.map(c => ({ c, tag: '' })), ...extra];
+    const n = fan.length;
+    $('#fHand').innerHTML = fan.map(({ c, tag }, i) => {
       const off = i - (n - 1) / 2;
-      const sel = usable(s, c.id) ? 'playable' : '';
+      const sel = tag || usable(s, c.id) ? 'playable' : '';
       // Selo do custo acima do canto esquerdo: no leque, a carta seguinte cobre o canto direito, onde fica o custo impresso.
       const cost = !c.faceDown && c.manaCost ? `<div class="hcost" aria-hidden="true">${manaHTML(c.manaCost)}</div>` : '';
-      return `<div class="hcard ${sel}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(label(c))}"
-        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}</div>`;
+      const where = tag ? `<div class="hzone">${esc(tag)}</div>` : '';
+      return `<div class="hcard ${sel}${tag ? ' outside' : ''}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(label(c))}${tag ? ` (${esc(tag)})` : ''}"
+        style="--rot:${off * 2.6}deg;--dy:${off * off * 2.2}px;z-index:${i + 1}">${face(c, 'normal')}${cost}${where}</div>`;
     }).join('');
 
     const stackEl = $('#fStack');
@@ -488,7 +535,12 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     stackEl.hidden = !s.stack.length;
 
     const group = PHASE_GROUP[s.phase ?? ''] ?? '';
-    $('#fPhases').innerHTML = `<div class="turn-no">Turno ${s.turn}</div>` + PHASES.map(([k, l]) =>
+    // De quem é o turno: etiqueta no trilho de fases e brilho na metade da mesa do jogador ativo.
+    const active = s.gameOver ? null : s.activePlayer === me.id ? 'mine' : s.activePlayer === opp.id ? 'theirs' : null;
+    root.querySelector('.field.me')!.classList.toggle('turn', active === 'mine');
+    root.querySelector('.field.opp')!.classList.toggle('turn', active === 'theirs');
+    const owner = active ? `<div class="turn-owner ${active}">${active === 'mine' ? 'Seu turno' : `Turno de ${esc(opp.name)}`}</div>` : '';
+    $('#fPhases').innerHTML = `<div class="turn-no">Turno ${s.turn}</div>${owner}` + PHASES.map(([k, l]) =>
       `<div class="ph ${group === k ? 'on' : ''} ${s.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
 
     // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
@@ -619,6 +671,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const ui = t.closest<HTMLElement>('[data-ui]')?.dataset.ui;
     if (ui === 'menu') { $('#fMenu').hidden = !$('#fMenu').hidden; return; }
     if (ui === 'log') { $('#fLogDrawer').hidden = !$('#fLogDrawer').hidden; return; }
+    if (ui === 'fullscreen') { void toggleFullscreen(); return; }
     if (ui === 'exit') {
       if (client?.state?.gameOver || disconnected || confirm(client?.state?.room ? 'Desistir e sair da sala?' : 'Desistir desta partida?')) { client?.send({ type: 'concede' }); opts.onExit(); }
       return;
@@ -633,7 +686,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }
     if (!client) return;
     const gy = t.closest<HTMLElement>('[data-gy]');
-    if (gy && client.state) { zoneOf = +gy.dataset.gy!; zoneView(client.state); return; }
+    if (gy && client.state) { zoneOf = +gy.dataset.gy!; zoneKind = gy.dataset.zone === 'exile' ? 'exile' : 'gy'; zoneView(client.state); return; }
 
     const opt = t.closest<HTMLElement>('[data-q-opt]');
     if (opt && qState) {
@@ -657,17 +710,24 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'ok' || act === 'cancel') {
       const gen = client.state?.input.gen ?? -1;
-      if (gen === clickedGen) return;
+      if (gen === clickedGen && Date.now() - clickedAt < CLICK_LOCK_MS) return;
       clickedGen = gen;
+      clickedAt = Date.now();
       client.send({ type: act, gen });
       render();
+      setTimeout(() => { if (clickedGen === gen) render(); }, CLICK_LOCK_MS + 50);
       return;
     }
     if (t.closest('.emblem')) return; // fica dentro do retrato, mas não é um clique no jogador
+    const mana = t.closest<HTMLElement>('[data-mana]')?.dataset.mana;
+    if (mana) { client.send({ type: 'mana', color: mana }); return; }
     const pl = t.closest<HTMLElement>('[data-pid]');
     if (pl) { client.send({ type: 'player', id: +pl.dataset.pid! }); return; }
     const cd = t.closest<HTMLElement>('[data-fid]');
-    if (cd) client.send({ type: 'card', id: +cd.dataset.fid! });
+    if (!cd) return;
+    // Usar uma carta do cemitério ou do exílio fecha a janela, para a pergunta seguinte aparecer.
+    if (cd.closest('#fZone')) { zoneOf = null; $('#fZone').hidden = true; }
+    client.send({ type: 'card', id: +cd.dataset.fid! });
   });
   root.addEventListener('submit', e => {
     if (!(e.target as HTMLElement).matches('[data-q-text]')) return;
@@ -695,7 +755,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   });
   root.addEventListener('keydown', e => {
     if (e.key === 'Escape' && zoneOf !== null) { zoneOf = null; $('#fZone').hidden = true; return; }
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-ctr],[data-fid],[data-pid],[data-gy]');
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mana],[data-ctr],[data-fid],[data-pid],[data-gy]');
     if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
   });
 

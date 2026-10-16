@@ -6,6 +6,49 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.5.0] - 2026-10-16
+
+### Novo
+- Cartas que dá para usar fora da mão (flashback no cemitério; tramadas, foretell e Aventura no exílio) aparecem na ponta da sua mão quando você pode usá-las, com uma etiqueta dizendo de onde vêm (**Cemitério**, **Exílio**, **Tramada**). A pilha de onde elas vêm também acende em azul. A mesa ainda não confere se você tem mana para pagar o custo.
+- 5 decks novos, tirados de listas que ficaram no top 8 de torneios de Standard em outubro/2026: **Ninho de Dragões** (Boros Dragons), **Teorema de Jace** (Azorius Control), **Banquete Jund** (Jund Sacrifice), **Destreza Izzet** (Izzet Prowess) e **Revelação em Quatro Cores** (4c Control).
+- Tela inicial nova, em três passos: escolha o modo (contra a IA ou em rede) em cartões grandes, o deck, e veja a partida montada (**Você vs Oponente**) num painel ao lado, com o botão **Jogar** sempre à vista.
+- Busca de decks por nome e filtros por cor e por origem (prontos ou seus).
+- Clique duplo num deck começa a partida contra a IA.
+- Botão de olho em cada deck da tela inicial abre uma prévia: as cartas separadas por tipo, com custo de mana, a curva de mana e o custo médio. Passe o mouse numa carta para vê-la ampliada (no celular, toque nela). Dá para escolher o deck direto dali.
+- A tela inicial lembra o último deck e o oponente escolhidos.
+- O endereço da ponte, na partida em rede, fica recolhido em "Endereço da ponte", para não atrapalhar quem só quer entrar numa sala.
+- Ícone novo na aba do navegador: o losango dourado da marca da tela inicial.
+- No celular a Mesa de Duelo é jogada **deitada**: ao começar uma partida, o jogo entra em tela cheia e trava a tela na horizontal (Android). Com o aparelho em pé, aparece um aviso para girar, com um botão para jogar em tela cheia onde o navegador permite.
+- Mesa e tela inicial ajustadas para celular deitado: cartas, mão, retratos, botões e perguntas no tamanho certo para telas baixas; o trilho de fases mostra só o turno e a fase atual; a carta ampliada fica ao lado do texto, em vez de em cima; e na tela inicial o painel da partida fica fixo à direita.
+- Botão de tela cheia no topo da mesa, ao lado de **Registro**: liga e desliga a tela cheia a qualquer momento da partida (no celular, também deixa a tela deitada). Não aparece no iPhone, onde o Safari não permite.
+- Adicionar o site à tela inicial do celular abre em tela cheia e na horizontal.
+- Tela **Gerenciar decks** nova: a lista mostra a capa de cada deck, as cores e o número de cartas, separada em **Meus decks** e **Decks prontos**, com busca por nome. **Novo deck** e **Importar lista** ficam no topo.
+- O deck aberto tem a capa no topo, o nome editável, a contagem de criaturas, outras mágicas e terrenos, e a curva de mana. Cada carta da lista tem a miniatura da arte e botões **−** e **+** ao lado da quantidade.
+- Decks prontos avisam que não podem ser alterados e oferecem **Duplicar para editar**.
+- A busca de cartas do montador ganhou atalhos de cor, tipo e **Standard**, e as dicas de sintaxe ficam recolhidas. Toque na carta para adicioná-la; um selo mostra quantas já estão no deck (ex.: 2/4).
+
+- Criaturas iguais (mesmo P/T, dano, marcadores e palavras-chave) ficam empilhadas no campo, com o contador **×N**, como os terrenos. Quem entra no combate sai da pilha.
+- Pilhas de permanentes têm largura máxima: acima de 4 cópias as cartas ficam mais juntas, e o contador continua mostrando o total.
+- De quem é o turno fica sempre à vista: etiqueta **Seu turno** / **Turno de…** no trilho de fases, anel dourado ou vermelho no retrato e um brilho na metade da mesa de quem joga.
+- Terrenos básicos com a série de vitrais de Magali Villeneuve (Dominaria United), em todas as telas.
+- Menos OK para apertar: quando você não tem nada que possa fazer (nenhuma carta jogável nem habilidade que dê para pagar), a prioridade passa sozinha, inclusive com a sua própria mágica ou gatilho na pilha.
+
+### Mudou
+- Letras novas, mais limpas: títulos, nomes de decks e banners trocaram a fonte serifada de estilo antigo (Cinzel) por uma sem serifa moderna (Outfit); o texto corrido e os números da mesa (vida, poder/resistência) passaram para Inter.
+
+### Corrigido
+- O botão **OK** não fica mais travado quando o Forge recusa a ação (um bloqueio inválido, por exemplo): dá para corrigir e confirmar de novo.
+- No celular deitado, o campo do código da sala mostra o que foi digitado e o botão **Entrar** aparece inteiro.
+- O fundo da tela inicial e da tela de decks fica parado ao rolar a página, em vez de rolar junto com o conteúdo.
+- Os créditos no rodapé da tela inicial e da tela de decks não cobrem mais o conteúdo.
+- O painel de **Novidades** abre por cima dos decks, em vez de ficar escondido atrás deles.
+- A busca de cartas do montador de decks voltou a ocupar a coluna inteira (tinha ficado espremida depois da tela inicial nova).
+- Ao mudar a busca de cartas rápido, a resposta de uma busca antiga não substitui mais a mais recente.
+- Decks sem criaturas (como Teorema de Jace) mostram a arte de outra carta do deck, em vez de um quadro vazio.
+- Cartas exiladas agora aparecem na mesa: o **exílio** ganhou uma pilha ao lado do cemitério (só quando tem cartas), e as tramadas levam a etiqueta **Tramada**.
+- Cartas tramadas (plot) podem ser conjuradas de novo: antes ficavam presas no exílio, sem como usá-las.
+- Pagamento manual com a mana já na reserva: se você virou os terrenos antes de conjurar, os símbolos de mana ao lado do seu retrato acendem durante o pagamento; toque em cada um para gastá-lo. Antes só o botão **Automático** conseguia usar essa mana.
+
 ## [0.4.0] - 2026-10-16
 
 ### Novo

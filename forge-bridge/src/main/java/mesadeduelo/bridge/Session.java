@@ -17,6 +17,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import forge.card.MagicColor;
 import forge.deck.Deck;
 import forge.game.GameEntityView;
 import forge.game.GameType;
@@ -26,6 +27,7 @@ import forge.game.player.PlayerView;
 import forge.game.player.RegisteredPlayer;
 import forge.game.spellability.StackItemView;
 import forge.gamemodes.match.HostedMatch;
+import forge.gamemodes.match.input.InputPayMana;
 import forge.gamemodes.net.IRemote;
 import forge.gamemodes.net.ProtocolMethod;
 import forge.gamemodes.net.event.GuiGameEvent;
@@ -36,6 +38,7 @@ import forge.gui.interfaces.IGuiGame;
 import forge.interfaces.IGameController;
 import forge.player.GamePlayerUtil;
 import forge.player.LobbyPlayerHuman;
+import forge.player.PlayerControllerHuman;
 import forge.trackable.TrackableCollection;
 import forge.util.FSerializableFunction;
 import io.netty.channel.Channel;
@@ -163,7 +166,9 @@ final class Session {
             case "hello" -> markDirty();
             case "ok", "cancel" -> {
                 int gen = msg.has("gen") ? msg.get("gen").getAsInt() : seat.inputGen.get();
-                if (gen != seat.inputGen.get() || gen == seat.consumedGen) { markDirty(); break; }
+                // Clique repetido no mesmo prompt só vale depois da trava: se o Forge recusou a ação (bloqueio
+                // inválido, por exemplo), o prompt continua o mesmo e o jogador precisa poder tentar de novo.
+                if (gen != seat.inputGen.get() || seat.buttonsLocked()) { markDirty(); break; }
                 seat.consumedGen = gen;
                 seat.consumedAt = System.currentTimeMillis();
                 markDirty();
@@ -173,6 +178,15 @@ final class Session {
             case "card" -> {
                 CardView cv = findCard(seat, msg.get("id").getAsInt());
                 if (cv != null) seat.onEdt(c -> c.selectCard(cv, null, null));
+            }
+            case "mana" -> {
+                // Gastar a mana da reserva no pagamento (o Forge não a usa sozinho, só no Automático).
+                byte color = switch (str(msg, "color", "")) {
+                    case "W" -> MagicColor.WHITE; case "U" -> MagicColor.BLUE; case "B" -> MagicColor.BLACK;
+                    case "R" -> MagicColor.RED; case "G" -> MagicColor.GREEN; case "C" -> MagicColor.COLORLESS;
+                    default -> -1;
+                };
+                if (color >= 0) seat.onEdt(c -> c.useMana(color));
             }
             case "player" -> {
                 PlayerView pv = findPlayer(msg.get("id").getAsInt());
@@ -464,6 +478,10 @@ final class Session {
                 JsonArray act = new JsonArray();
                 seat.actionable.forEach(act::add);
                 input.add("actionable", act);
+                // Pagando um custo de mana: a reserva fica clicável no retrato.
+                if (seat.controller() instanceof PlayerControllerHuman pch && pch.getInputQueue().getInput() instanceof InputPayMana) {
+                    input.addProperty("paying", true);
+                }
                 CardView promptCard = seat.promptCard;
                 if (promptCard != null) input.add("card", StateJson.card(promptCard));
                 state.add("input", input);

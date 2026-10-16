@@ -29,6 +29,8 @@ export interface FCard {
   counters?: Record<string, number>;
   planeswalker?: boolean;
   emblem?: boolean;
+  /** Tramada (plot) no exílio. */
+  plotted?: boolean;
   /** Id da carta a que esta aura ou equipamento está preso. */
   attachedTo?: number;
   attachedToPlayer?: number;
@@ -87,6 +89,8 @@ export interface FState {
   gameOver: boolean;
   winner?: string;
   players: FPlayer[];
+  /** Cartas do cemitério ou do exílio (de qualquer jogador) que você pode usar agora: flashback, tramadas... */
+  castable?: number[];
   stack: { id: number; text: string; source?: FCard; controller?: number }[];
   combat: { attacker: number; defender?: number; blockers: number[] }[];
   log: string[];
@@ -94,7 +98,8 @@ export interface FState {
   /** gen: versão do prompt; acompanha os cliques em OK/Cancelar para a ponte descartar cliques atrasados. */
   /** actionable: cartas que podem ser usadas agora (jogáveis, atacantes ou bloqueadores possíveis). */
   /** card: carta citada pelo prompt (ex.: a do topo do grimório na vidência ou na vigilância de 1). */
-  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard };
+  /** paying: pagando um custo de mana; a mana da reserva pode ser gasta com {type:"mana", color}. */
+  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard; paying?: boolean };
   question?: FQuestion;
   room?: FRoom;
   /** Para voltar a esta partida se a conexão cair: {type:"rejoin", code, token}. */
@@ -110,6 +115,7 @@ export type ClientMessage =
   | { type: 'rematch' } | { type: 'leave' }
   | { type: 'card'; id: number }
   | { type: 'player'; id: number }
+  | { type: 'mana'; color: string }
   | { type: 'ok' | 'cancel'; gen?: number } | { type: 'concede' } | { type: 'hello' }
   | { type: 'answer'; id: number; indices?: number[]; value?: boolean; text?: string };
 

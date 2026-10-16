@@ -105,11 +105,11 @@ export const DEFAULT_DECKS: DeckData[] = [
       { name: 'Spyglass Siren', count: 4 }, { name: 'Spectral Sailor', count: 3 }, { name: 'Faerie Dreamthief', count: 2 },
       { name: 'Silent Hallcreeper', count: 4 }, { name: 'Shoreline Looter', count: 3 }, { name: 'Malcolm, Alluring Scoundrel', count: 2 },
       // Ninjas com Sneak
-      { name: 'Splinter, Hamato Yoshi', count: 3 }, { name: 'Oroku Saki, Shredder Rising', count: 4 },
-      { name: 'Elektra, Daughter of the Hand', count: 2 }, { name: 'Shredder, Unrelenting', count: 1 },
+      { name: 'Splinter, Hamato Yoshi', count: 3 }, { name: 'Oroku Saki, Shredder Rising', count: 4 }, { name: 'Elektra, Daughter of the Hand', count: 2 },
+      { name: 'Shredder, Unrelenting', count: 1 },
       // Ninjutsu e técnicas
-      { name: 'Kaito, Bane of Nightmares', count: 3 }, { name: "Shredder's Technique", count: 3 },
-      { name: "Donatello's Technique", count: 3 }, { name: "Splinter's Technique", count: 1 },
+      { name: 'Kaito, Bane of Nightmares', count: 3 }, { name: "Shredder's Technique", count: 3 }, { name: "Donatello's Technique", count: 3 },
+      { name: "Splinter's Technique", count: 1 },
     ],
   },
   {
@@ -125,6 +125,91 @@ export const DEFAULT_DECKS: DeckData[] = [
       // Planeswalker e mágicas (12)
       { name: 'Elspeth, Storm Slayer', count: 4 }, { name: "Caretaker's Talent", count: 3 }, { name: 'Hop to It', count: 2 },
       { name: 'Get Lost', count: 3 },
+    ],
+  },
+  {
+    // Boros Dragons (Standard, out/2026, top 8 de torneio): Momo e Sarkhan aceleram dragões como Magmatic Hellkite, Nova Hellkite e Smaug; Cavern of Souls impede contramágicas.
+    id: 'padrao-dragoes', name: 'Ninho de Dragões', builtin: true,
+    cards: [
+      // Terrenos (24)
+      { name: 'Inspiring Vantage', count: 4 }, { name: 'Multiversal Passage', count: 4 }, { name: 'Sacred Foundry', count: 4 },
+      { name: 'Sunbillow Verge', count: 4 }, { name: 'Cavern of Souls', count: 3 }, { name: 'Maelstrom of the Spirit Dragon', count: 3 },
+      { name: 'Mountain', count: 1 }, { name: 'Plains', count: 1 },
+      // Criaturas (30)
+      { name: 'Clarion Conqueror', count: 4 }, { name: 'Magmatic Hellkite', count: 4 }, { name: 'Momo, Friendly Flier', count: 4 },
+      { name: 'Nova Hellkite', count: 4 }, { name: 'Sarkhan, Dragon Ascendant', count: 4 }, { name: 'Smaug the Magnificent', count: 4 },
+      { name: 'Voice of Victory', count: 4 }, { name: 'Twinmaw Stormbrood', count: 2 },
+      // Mágicas e permanentes (6)
+      { name: 'Burst Lightning', count: 4 }, { name: 'Erode', count: 2 },
+    ],
+  },
+  {
+    // Azorius Control (Standard, out/2026): contramágicas, remoção e varredura até The Theorist, Jace Beleren e Jace Reawakened fecharem o jogo.
+    id: 'padrao-azorius-controle', name: 'Teorema de Jace', builtin: true,
+    cards: [
+      // Terrenos (26)
+      { name: 'Deserted Beach', count: 4 }, { name: 'Floodfarm Verge', count: 4 }, { name: 'Hallowed Fountain', count: 4 },
+      { name: 'Island', count: 3 }, { name: 'Petrified Hamlet', count: 3 }, { name: 'Meticulous Archive', count: 2 },
+      { name: 'Plains', count: 2 }, { name: 'Restless Anchorage', count: 2 }, { name: "Theorist's Sanctum", count: 2 },
+      // Planeswalkers (5)
+      { name: 'The Theorist, Jace Beleren', count: 4 }, { name: 'Jace Reawakened', count: 1 },
+      // Mágicas e permanentes (29)
+      { name: 'Consult the Star Charts', count: 4 }, { name: 'Countersculpt', count: 4 }, { name: 'Get Lost', count: 4 },
+      { name: "Jace's Machinations", count: 4 }, { name: 'No More Lies', count: 3 }, { name: 'Seam Rip', count: 3 },
+      { name: 'Day of Judgment', count: 2 }, { name: 'Pinnacle Starcage', count: 2 }, { name: 'Erode', count: 1 },
+      { name: 'Spell Snare', count: 1 }, { name: 'Three Steps Ahead', count: 1 },
+    ],
+  },
+  {
+    // Jund Sacrifice (Standard, out/2026): criaturas que viram comida e tesouro alimentam Gene Pollinator, Callous Inspector e Rottenmouth Viper.
+    id: 'padrao-jund', name: 'Banquete Jund', builtin: true,
+    cards: [
+      // Terrenos (21)
+      { name: 'Blazemire Verge', count: 4 }, { name: 'Overgrown Tomb', count: 4 }, { name: 'Starting Town', count: 4 },
+      { name: 'Stomping Ground', count: 3 }, { name: 'Wastewood Verge', count: 2 }, { name: 'Blood Crypt', count: 1 },
+      { name: 'Blooming Marsh', count: 1 }, { name: 'Forest', count: 1 }, { name: 'Swamp', count: 1 },
+      // Criaturas (25)
+      { name: 'Biotech Specialist', count: 4 }, { name: 'Gene Pollinator', count: 4 }, { name: 'Greedy Freebooter', count: 4 },
+      { name: 'The Sackville-Bagginses', count: 4 }, { name: 'Callous Inspector', count: 3 }, { name: 'Rottenmouth Viper', count: 2 },
+      { name: 'Umbral Collar Zealot', count: 2 }, { name: 'Smaug the Magnificent', count: 1 }, { name: 'Wolverine, Fierce Fighter', count: 1 },
+      // Mágicas e permanentes (14)
+      { name: 'Lively Dirge', count: 4 }, { name: 'Obsessive Pursuit', count: 4 }, { name: 'Requiting Hex', count: 2 },
+      { name: 'Stir Up Trouble', count: 2 }, { name: 'The Misty Mountains Cold', count: 2 },
+    ],
+  },
+  {
+    // Izzet Prowess (Standard, out/2026): mágicas baratas disparam a destreza de Elusive Otter, Slickshot Show-Off e Pompous Battlemage.
+    id: 'padrao-prowess', name: 'Destreza Izzet', builtin: true,
+    cards: [
+      // Terrenos (20)
+      { name: 'Island', count: 4 }, { name: 'Riverpyre Verge', count: 4 }, { name: 'Spirebluff Canal', count: 4 },
+      { name: 'Steam Vents', count: 4 }, { name: 'Multiversal Passage', count: 2 }, { name: 'Mountain', count: 1 },
+      { name: 'Starting Town', count: 1 },
+      // Criaturas (14)
+      { name: 'Elusive Otter', count: 4 }, { name: 'Pompous Battlemage', count: 4 }, { name: 'Slickshot Show-Off', count: 4 },
+      { name: 'Eddymurk Crab', count: 2 },
+      // Mágicas e permanentes (26)
+      { name: 'Burst Lightning', count: 4 }, { name: 'Flow State', count: 4 }, { name: 'Opt', count: 4 },
+      { name: 'Sleight of Hand', count: 4 }, { name: 'Bounce Off', count: 2 }, { name: 'Impractical Joke', count: 2 },
+      { name: 'Secret Identity', count: 2 }, { name: 'Spell Snare', count: 1 }, { name: 'Stock Up', count: 1 },
+      { name: 'Vibrant Outburst', count: 1 }, { name: 'Wild Ride', count: 1 },
+    ],
+  },
+  {
+    // 4c Control (Standard, out/2026): Tablet of Discovery e Stock Up compram cartas, remoção segura o jogo e Jeskai Revelation vira a partida.
+    id: 'padrao-4c', name: 'Revelação em Quatro Cores', builtin: true,
+    cards: [
+      // Terrenos (26)
+      { name: 'Blood Crypt', count: 4 }, { name: 'Great Hall of the Biblioplex', count: 4 }, { name: 'Bleachbone Verge', count: 3 },
+      { name: 'Riverpyre Verge', count: 3 }, { name: 'Sacred Foundry', count: 3 }, { name: 'Shattered Sanctum', count: 2 },
+      { name: 'Steam Vents', count: 2 }, { name: 'Deserted Beach', count: 1 }, { name: 'Mistrise Village', count: 1 },
+      { name: 'Plains', count: 1 }, { name: 'Shipwreck Marsh', count: 1 }, { name: 'Swamp', count: 1 },
+      // Mágicas e permanentes (34)
+      { name: 'Inevitable Defeat', count: 4 }, { name: 'Jeskai Revelation', count: 4 }, { name: 'Stock Up', count: 4 },
+      { name: 'Tablet of Discovery', count: 4 }, { name: 'Consult the Star Charts', count: 2 }, { name: 'Deadly Cover-Up', count: 2 },
+      { name: 'Duress', count: 2 }, { name: 'Fire Magic', count: 2 }, { name: 'Firebending Lesson', count: 2 },
+      { name: 'Flashback', count: 2 }, { name: 'Lightning Helix', count: 2 }, { name: 'Strategic Betrayal', count: 2 },
+      { name: 'Sear', count: 1 }, { name: 'Together as One', count: 1 },
     ],
   },
 ];
