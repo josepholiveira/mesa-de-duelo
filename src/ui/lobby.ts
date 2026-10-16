@@ -2,6 +2,7 @@ import { allDecks, deckSize, type DeckData } from '../decks';
 import { FORGE_URL } from '../forge/client';
 import { cardInfo, type CardInfo, type Color } from '../cards';
 import { cacheGet, fetchByNames } from '../scryfall';
+import { mountChangelog } from './changelog';
 import { esc, pip } from './cardtext';
 
 const COLOR_ORDER: Color[] = ['W', 'U', 'B', 'R', 'G'];
@@ -169,6 +170,7 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
   (root.querySelector('#netName') as HTMLInputElement).value = load(NAME_KEY) ?? '';
   (root.querySelector('#netUrl') as HTMLInputElement).value = load(URL_KEY) ?? '';
 
+  mountChangelog(root.querySelector('.lobby')!);
   refresh();
   // Pré-carrega as cartas dos decks para mostrar cores e artes.
   fetchByNames(allDecks().flatMap(d => d.cards.map(c => c.name))).then(refresh).catch(() => {});

@@ -555,3 +555,26 @@ body[data-screen='game'] .credits { display: none; }
 .net-wait .arena-btn { margin-left: auto; }
 .avatar .offline { position: absolute; left: 50%; bottom: -18px; transform: translateX(-50%); white-space: nowrap; padding: 1px 8px; border-radius: 999px; background: #3b1d1d; color: #ffb3a3; font-size: 11px; }
 .overlay > .result.still h2, .overlay > .result.still p, .overlay > .result.still .result-btns { animation: none; }
+
+/* Novidades: botão no canto da tela inicial, painel com o CHANGELOG.md. */
+.news { position: absolute; z-index: 5; top: 16px; right: 16px; }
+.news-btn {
+  position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); cursor: pointer; font-size: 14px;
+}
+.news-btn:hover, .news-btn[aria-expanded='true'] { border-color: var(--gold); }
+.news-ver { color: var(--gold); font-weight: 700; }
+.news-dot { position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+.news-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; width: min(420px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto;
+  padding: 4px 18px 14px; border-radius: 12px; background: rgba(12, 18, 32, 0.97); border: 1px solid var(--line);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6); font-size: 14px; line-height: 1.45;
+}
+.news-rel + .news-rel { border-top: 1px solid var(--line); }
+.news-rel h3 { margin: 14px 0 6px; font: 700 17px var(--display); color: var(--gold); }
+.news-rel h3 small { margin-left: 6px; font: 400 13px var(--body); color: var(--muted); }
+.news-rel h4 { margin: 10px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.news-rel p { margin: 4px 0; }
+.news-rel ul { margin: 4px 0; padding-left: 18px; }
+.news-rel li { margin: 3px 0; }
+.news-rel code { background: #18223a; padding: 1px 5px; border-radius: 4px; }
