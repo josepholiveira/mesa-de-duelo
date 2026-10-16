@@ -1,0 +1,22 @@
+# Deploy no Coolify (build pack "Docker Compose"): ponha o domínio só no serviço "web".
+services:
+  web:
+    build: .
+    depends_on:
+      - bridge
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  bridge:
+    build: ./forge-bridge
+    environment:
+      - JAVA_OPTS=${JAVA_OPTS:--Xmx2g}
+    expose:
+      - "7171"
+    volumes:
+      - forge-data:/root/.forge
+    restart: unless-stopped
+
+volumes:
+  forge-data:

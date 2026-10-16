@@ -122,9 +122,13 @@ export type ClientMessage =
 /**
  * Endereço padrão da ponte: a mesma máquina que serviu a página. Assim, quem abre a página pela rede
  * (http://IP-DO-ANFITRIÃO:5173) já encontra a ponte do anfitrião. "localhost" vira 127.0.0.1 porque a
- * ponte só escuta IPv4.
+ * ponte só escuta IPv4. Fora do Vite (dev na 5173, preview na 4173), a página está publicada atrás de um
+ * proxy que repassa /ws para a ponte no mesmo endereço (veja deploy/nginx.conf).
  */
 function defaultUrl() {
+  if (typeof location !== 'undefined' && location.host && !['5173', '4173'].includes(location.port)) {
+    return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  }
   const host = typeof location === 'undefined' || !location.hostname || location.hostname === 'localhost' ? '127.0.0.1' : location.hostname;
   return `ws://${host.includes(':') ? `[${host}]` : host}:7171/ws`;
 }

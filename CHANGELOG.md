@@ -6,6 +6,11 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.5.1] - 2026-10-16
+
+### Correções
+- Publicada na internet, a mesa encontra a ponte sozinha no mesmo endereço do site (`wss://seu-dominio/ws`), sem precisar abrir a porta 7171.
+
 ## [0.5.0] - 2026-10-16
 
 ### Novo

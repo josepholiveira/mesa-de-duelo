@@ -59,6 +59,16 @@ npm run dev:rede     # site acessível pela rede (Vite com --host)
 
 Se a conexão cair, o navegador volta sozinho ao mesmo assento, inclusive depois de recarregar a página ou fechar e abrir a aba de novo (a partida fica guardada no `localStorage`). Vale também para partidas contra a IA. A ponte guarda uma partida sem ninguém conectado por 5 minutos (`-Dmesa.grace=SEGUNDOS` em `MAVEN_OPTS` muda isso). No fim, a revanche começa quando os dois pedirem. Fora da rede local é preciso liberar a porta 7171 (e a 5173, se o oponente for abrir o site do anfitrião) no roteador ou usar uma VPN como Tailscale. A ponte não tem senha nem criptografia: só abra para fora em quem você confia.
 
+## Publicar no Coolify
+
+O `docker-compose.yml` sobe dois serviços: `web` (o site no nginx, que repassa `/ws` para a ponte) e `bridge` (a ponte do Forge, compilada dentro da imagem a partir do commit do Forge fixado em `forge-bridge/Dockerfile`).
+
+1. No Coolify, crie um recurso a partir deste repositório no GitHub e escolha o build pack **Docker Compose** (arquivo `docker-compose.yml`).
+2. Coloque o domínio (ex.: `https://mesa.seudominio.com`) só no serviço **web**. A ponte não precisa de domínio nem de porta aberta.
+3. Faça o deploy. O primeiro build da ponte demora (clona e compila o Forge); o servidor precisa de uns 3 GB de RAM livres para compilar e 2 GB para rodar. `JAVA_OPTS` muda a memória da ponte (padrão `-Xmx2g`).
+
+A página publicada conecta em `wss://seu-dominio/ws` sozinha. Para atualizar o Forge, troque `FORGE_COMMIT` no `forge-bridge/Dockerfile` (e `forge.version` no `pom.xml`, se a versão mudar).
+
 ## Estrutura
 
 | Caminho | O que faz |
