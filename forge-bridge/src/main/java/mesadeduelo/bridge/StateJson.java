@@ -95,12 +95,18 @@ final class StateJson {
         o.add("battlefield", cards(p.getBattlefield(), game));
         o.add("graveyard", cards(p.getGraveyard(), game));
         o.add("exile", cards(p.getExile(), game));
+        // Zona de comando: só os emblemas (os efeitos temporários do Forge também moram lá).
+        JsonArray emblems = new JsonArray();
+        for (CardView c : nzv(p.getCommand())) if (c.isEmblem()) emblems.add(card(c, game));
+        o.add("emblems", emblems);
         JsonObject pool = new JsonObject();
         for (int i = 0; i < 5; i++) pool.addProperty(COLOR_KEYS[i], p.getMana(MagicColor.WUBRG[i]));
         pool.addProperty("C", p.getMana(MagicColor.COLORLESS));
         o.add("pool", pool);
         return o;
     }
+
+    private static Iterable<CardView> nzv(Iterable<CardView> it) { return it == null ? java.util.List.of() : it; }
 
     static JsonArray cards(Iterable<CardView> cs, Game game) {
         JsonArray a = new JsonArray();
@@ -128,7 +134,9 @@ final class StateJson {
         String cost = s.getManaCost() == null ? "" : s.getManaCost().toString();
         o.addProperty("manaCost", "no cost".equals(cost) ? "" : cost);
         o.addProperty("typeLine", s.getType() == null ? "" : s.getType().toString());
-        o.addProperty("text", s.getOracleText());
+        // Emblemas não têm texto Oracle: o texto vem das habilidades que o efeito carrega.
+        o.addProperty("text", c.isEmblem() ? c.getText().replace("\r", "").trim() : s.getOracleText());
+        if (c.isEmblem()) o.addProperty("emblem", true);
         o.addProperty("creature", s.isCreature());
         o.addProperty("land", s.isLand());
         if (s.isPlaneswalker()) o.addProperty("planeswalker", true);

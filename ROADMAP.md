@@ -17,15 +17,15 @@ No construtor de decks, um campo **Importar por link** que aceita a URL pública
 - [ ] Normalizar nomes: cartas de duas faces (`A // B`) e nomes que o Forge não conhece; avisar quais cartas ficaram de fora em vez de falhar o deck inteiro.
 - [ ] Pré-carregar as imagens com `fetchByNames` depois de importar.
 - [ ] Erros claros: link inválido, deck privado, sem rede, deck vazio.
-- [ ] Bônus: aceitar também a lista em texto colado (`4 Lightning Bolt`, formato de exportação do Moxfield/Arena), que serve de alternativa quando o link falhar.
+- [x] Bônus: aceitar também a lista em texto colado (`4 Lightning Bolt`, formato de exportação do Moxfield/Arena), que serve de alternativa quando o link falhar.
 
-## 2. Custo de mana visível no leque de cartas da mão
+## 2. Custo de mana visível no leque de cartas da mão ✅
 
 Hoje as cartas da mão (`.hcard`, `src/style.css`) se sobrepõem em 34% da largura (`margin-left: calc(var(--hcw) * -0.34)`), e a carta seguinte cobre o canto superior direito da anterior, que é justamente onde fica o custo de mana. Só dá para ver o custo passando o mouse.
 
-- [ ] Mostrar um selo com o custo de mana no canto **superior esquerdo** de cada carta da mão (a parte que fica descoberta no leque), usando `manaHTML` de `src/ui/cardtext.ts` com o `manaCost` que já chega em `FCard`.
-- [ ] Gerar o selo em `face()`/no `map` da mão em `src/ui/forgeTable.ts` (só para a mão, não para o campo de batalha).
-- [ ] Estilo: fundo escuro semitransparente, símbolos legíveis no tamanho atual de `--hcw`, sem tapar o nome da carta além do necessário.
-- [ ] Terrenos e cartas sem custo: não mostrar selo.
-- [ ] Cartas de duas faces / custo alternativo: mostrar o custo da face da frente.
-- [ ] Conferir em mão cheia (7+ cartas) e em tela estreita, onde a sobreposição é maior.
+- [x] Mostrar um selo com o custo de mana no canto **superior esquerdo** de cada carta da mão, saindo pela borda de cima (a parte que fica descoberta no leque), usando `manaHTML` de `src/ui/cardtext.ts` com o `manaCost` que já chega em `FCard`.
+- [x] Gerar o selo em `face()`/no `map` da mão em `src/ui/forgeTable.ts` (só para a mão, não para o campo de batalha).
+- [x] Estilo: fundo escuro semitransparente, símbolos legíveis no tamanho atual de `--hcw`, sem tapar o nome da carta além do necessário.
+- [x] Terrenos e cartas sem custo: não mostrar selo.
+- [x] Cartas de duas faces / custo alternativo: mostrar o custo da face da frente.
+- [x] Conferir em mão cheia (7+ cartas) e em tela estreita, onde a sobreposição é maior.

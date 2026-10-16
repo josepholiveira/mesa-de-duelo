@@ -6,6 +6,7 @@ import java.util.Map;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import forge.StaticData;
 import forge.deck.Deck;
 
 /** Os mesmos decks padrão do frontend (src/decks.ts). */
@@ -83,10 +84,19 @@ final class Decks {
         Deck deck = new Deck(o.has("name") ? o.get("name").getAsString() : "Deck");
         for (JsonElement c : o.getAsJsonArray("cards")) {
             JsonObject entry = c.getAsJsonObject();
-            deck.getMain().add(entry.get("name").getAsString(), entry.get("count").getAsInt());
+            deck.getMain().add(forgeName(entry.get("name").getAsString()), entry.get("count").getAsInt());
         }
         if (deck.getMain().countAll() == 0) throw new IllegalArgumentException("Deck vazio: " + deck.getName());
         return deck;
+    }
+
+    /**
+     * O Scryfall chama toda carta de duas faces de "Frente // Verso", mas o Forge só usa esse formato nas
+     * cartas divididas (Fire // Ice); transformáveis, modais e aventuras ficam com o nome da frente.
+     */
+    static String forgeName(String name) {
+        if (!name.contains(" // ") || StaticData.instance().getCommonCards().getCard(name) != null) return name;
+        return name.substring(0, name.indexOf(" // "));
     }
 
     static Deck build(String id) {

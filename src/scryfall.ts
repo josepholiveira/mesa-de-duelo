@@ -148,3 +148,37 @@ export async function searchCards(q: string, page = 1): Promise<{ cards: ScryCar
   await addPortuguese(cards);
   return { cards, hasMore: !!json.has_more, total: json.total_cards ?? cards.length };
 }
+
+/**
+ * Confere nomes digitados ou colados contra o Scryfall e devolve o nome oficial (em inglês) de cada um.
+ * Aceita a face da frente de cartas de duas faces e, para o que não achar, tenta o nome impresso
+ * em outros idiomas (ex.: "Golpe Relampejante"). A chave do mapa é o nome de entrada em minúsculas.
+ */
+export async function resolveCardNames(names: string[]): Promise<{ found: Map<string, string>; missing: string[] }> {
+  const found = new Map<string, string>();
+  const todo: string[] = [];
+  for (const n of new Set(names)) {
+    const c = cacheGet(n);
+    if (c) found.set(n.toLowerCase(), c.name); else todo.push(n);
+  }
+  for (let i = 0; i < todo.length; i += 75) {
+    const chunk = todo.slice(i, i + 75);
+    const { json } = await request('/cards/collection', { identifiers: chunk.map(name => ({ name })) });
+    const byName = new Map<string, string>();
+    for (const d of json?.data ?? []) {
+      const s = slim(d);
+      cachePut(s);
+      byName.set(s.name.toLowerCase(), s.name);
+      for (const f of d.card_faces ?? []) if (f.name) byName.set(String(f.name).toLowerCase(), s.name);
+    }
+    for (const n of chunk) { const hit = byName.get(n.toLowerCase()); if (hit) found.set(n.toLowerCase(), hit); }
+  }
+  const missing: string[] = [];
+  for (const n of todo.filter(n => !found.has(n.toLowerCase()))) {
+    try {
+      const r = await searchCards(`!"${n.replace(/"/g, '')}"`);
+      if (r.cards[0]) found.set(n.toLowerCase(), r.cards[0].name); else missing.push(n);
+    } catch { missing.push(n); }
+  }
+  return { found, missing };
+}

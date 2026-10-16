@@ -26,6 +26,7 @@ export interface FCard {
   blocking?: boolean;
   counters?: Record<string, number>;
   planeswalker?: boolean;
+  emblem?: boolean;
   /** Id da carta a que esta aura ou equipamento está preso. */
   attachedTo?: number;
   attachedToPlayer?: number;
@@ -44,6 +45,8 @@ export interface FPlayer {
   battlefield: FCard[];
   graveyard: FCard[];
   exile: FCard[];
+  /** Emblemas na zona de comando (nome "Emblem — Planeswalker"). */
+  emblems?: FCard[];
   pool: Record<string, number>;
 }
 
@@ -52,7 +55,8 @@ export interface FOption { kind?: 'card' | 'player'; card?: FCard; id?: number; 
 export interface FQuestion {
   id: number;
   method: string;
-  kind: 'choose' | 'confirm' | 'order' | 'text';
+  /** reveal: só mostra as cartas (Explore, revelar o topo...); responde com indices vazio. */
+  kind: 'choose' | 'confirm' | 'order' | 'text' | 'reveal';
   title: string;
   min?: number;
   max?: number;

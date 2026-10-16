@@ -1,6 +1,6 @@
-import { DEFAULT_DECKS, deckSize, isBasic, loadUserDecks, saveUserDecks, type DeckData } from '../decks';
+import { DEFAULT_DECKS, deckSize, isBasic, loadUserDecks, parseDeckList, saveUserDecks, type DeckData } from '../decks';
 import { cardInfo, type CardInfo, type CardType } from '../cards';
-import { cacheGet, fetchByNames, searchCards, type ScryCard } from '../scryfall';
+import { cacheGet, fetchByNames, resolveCardNames, searchCards, type ScryCard } from '../scryfall';
 import { esc, manaHTML, richText } from './cardtext';
 
 const MAX_COPIES = 4;
@@ -30,6 +30,13 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   let searching = false;
   let error = '';
   let hover: CardInfo | null = null;
+  /** Painel "Importar lista" aberto no lugar do editor; draft guarda o que foi digitado. */
+  let importing = false;
+  let importBusy = false;
+  let importError = '';
+  let importDraft = { name: '', text: '' };
+  /** Aviso mostrado no deck recém-importado (cartas não encontradas, sideboard ignorado). */
+  let importReport: { id: string; missing: string; info: string } | null = null;
 
   root.innerHTML = `
   <div class="builder">
@@ -38,7 +45,8 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
       <h1>Decks</h1>
     </header>
     <div class="builder-grid">
-      <aside class="panel-box deck-list"><h2>Seus decks</h2><ul id="bDecks"></ul><button class="arena-btn secondary" data-b="new">Novo deck</button></aside>
+      <aside class="panel-box deck-list"><h2>Seus decks</h2><ul id="bDecks"></ul><button class="arena-btn secondary" data-b="new">Novo deck</button>
+        <button class="arena-btn secondary" data-b="import">Importar lista</button></aside>
       <section class="panel-box deck-edit" id="bEdit"></section>
       <section class="panel-box search">
         <h2>Buscar cartas no Scryfall</h2>
@@ -66,7 +74,60 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     $('#bDecks').innerHTML = [...DEFAULT_DECKS, ...user].map(item).join('');
   }
 
+  function renderImport() {
+    $('#bEdit').innerHTML = `
+      <div class="edit-head"><h2>Importar lista</h2></div>
+      <form id="bImport" class="import-form">
+        <input id="bImpName" class="name-input" placeholder="Nome do deck" value="${esc(importDraft.name)}" aria-label="Nome do deck">
+        <textarea id="bImpText" rows="16" spellcheck="false" aria-label="Lista do deck"
+          placeholder="4 Lightning Bolt&#10;4x Goblin Guide (ZEN) 126&#10;20 Mountain&#10;&#10;Sideboard&#10;2 Duress">${esc(importDraft.text)}</textarea>
+        <p class="note">Cole a lista exportada do Arena, MTGO, Moxfield ou Archidekt: uma carta por linha, com a quantidade na frente.
+          Nomes em inglês ou português. Sideboard e maybeboard ficam de fora.</p>
+        ${importError ? `<p class="note error">${esc(importError)}</p>` : ''}
+        <div class="edit-actions">
+          <button class="arena-btn primary" ${importBusy ? 'disabled' : ''}>${importBusy ? 'Conferindo cartas…' : 'Importar'}</button>
+          <button type="button" class="arena-btn secondary" data-b="import-cancel" ${importBusy ? 'disabled' : ''}>Cancelar</button>
+        </div>
+      </form>`;
+  }
+
+  async function runImport() {
+    const parsed = parseDeckList(importDraft.text);
+    if (!parsed.main.length) { importError = 'Nenhuma carta encontrada na lista.'; renderImport(); return; }
+    importBusy = true; importError = ''; renderImport();
+    let res: Awaited<ReturnType<typeof resolveCardNames>>;
+    try {
+      res = await resolveCardNames(parsed.main.map(e => e.name));
+    } catch (e) {
+      importBusy = false;
+      importError = `Não foi possível conferir as cartas no Scryfall: ${(e as Error).message}`;
+      renderImport();
+      return;
+    }
+    importBusy = false;
+    // Nomes diferentes na lista (ex.: em português e em inglês) podem virar a mesma carta.
+    const cards = new Map<string, DeckData['cards'][number]>();
+    for (const e of parsed.main) {
+      const name = res.found.get(e.name.toLowerCase());
+      if (!name) continue;
+      const c = cards.get(name);
+      if (c) c.count += e.count; else cards.set(name, { name, count: e.count });
+    }
+    if (!cards.size) { importError = `Nenhuma carta reconhecida: ${res.missing.join(', ')}.`; renderImport(); return; }
+    const d: DeckData = { id: crypto.randomUUID(), name: importDraft.name.trim() || 'Deck importado', cards: [...cards.values()] };
+    user.push(d); selected = d.id;
+    importReport = {
+      id: d.id,
+      missing: res.missing.length ? `Não encontradas (ficaram de fora): ${res.missing.join(', ')}.` : '',
+      info: [parsed.sideboard ? `${parsed.sideboard} carta(s) de sideboard/maybeboard ignorada(s).` : '',
+      parsed.skipped.length ? `Linhas ignoradas: ${parsed.skipped.join(' · ')}.` : ''].filter(Boolean).join(' '),
+    };
+    importing = false; importDraft = { name: '', text: '' };
+    save(); render(); void ensureDefs();
+  }
+
   function renderEdit() {
+    if (importing) return renderImport();
     const d = current();
     const ro = !!d.builtin;
     const groups = new Map<string, { e: DeckData['cards'][number]; def: CardInfo | null }[]>();
@@ -98,6 +159,8 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
         <button class="arena-btn secondary" data-b="dup">Duplicar</button>
         ${ro ? '<span class="note">Deck padrão: duplique para editar.</span>' : '<button class="arena-btn secondary danger" data-b="del">Excluir</button>'}
       </div>
+      ${importReport?.id === d.id && importReport.missing ? `<p class="note error">${esc(importReport.missing)}</p>` : ''}
+      ${importReport?.id === d.id && importReport.info ? `<p class="note">${esc(importReport.info)}</p>` : ''}
       ${size < 40 ? '<p class="note">Recomendado: pelo menos 40 cartas, cerca de 17 terrenos.</p>' : ''}
       ${TYPE_ORDER.map(k => section(k, TYPE_PT[k])).join('')}
       ${section('unknown', 'Carregando…')}`;
@@ -166,12 +229,14 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     const btn = t.closest<HTMLElement>('[data-b],[data-select],[data-inc],[data-dec],[data-add]');
     if (!btn) return;
     const ds = btn.dataset;
-    if (ds.select) { selected = ds.select; render(); void ensureDefs(); return; }
+    if (ds.select) { selected = ds.select; importing = false; importReport = null; render(); void ensureDefs(); return; }
     if (ds.inc) return change(ds.inc, 1);
     if (ds.dec) return change(ds.dec, -1);
     if (ds.add) return change(ds.add, 1);
     switch (ds.b) {
       case 'back': opts.onBack(); break;
+      case 'import': importing = true; importError = ''; importReport = null; renderEdit(); break;
+      case 'import-cancel': importing = false; importError = ''; renderEdit(); break;
       case 'new': {
         const d: DeckData = { id: crypto.randomUUID(), name: 'Novo deck', cards: [] };
         user.push(d); selected = d.id; save(); render();
@@ -196,12 +261,19 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   });
   root.addEventListener('submit', e => {
     e.preventDefault();
+    if ((e.target as HTMLElement).id === 'bImport') { if (!importBusy) void runImport(); return; }
     query = ($('#bQuery') as HTMLInputElement).value.trim();
     void runSearch();
   });
   root.addEventListener('change', e => {
     const t = e.target as HTMLInputElement;
+    if (t.id === 'bImpName') importDraft.name = t.value;
     if (t.id === 'bName') { const d = current(); if (!d.builtin) { d.name = t.value.trim() || 'Sem nome'; save(); renderList(); } }
+  });
+  root.addEventListener('input', e => {
+    const t = e.target as HTMLInputElement;
+    if (t.id === 'bImpText') importDraft.text = t.value;
+    if (t.id === 'bImpName') importDraft.name = t.value;
   });
   root.addEventListener('pointerover', e => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-hover]');

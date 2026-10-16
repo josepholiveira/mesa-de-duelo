@@ -6,6 +6,20 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.3.0] - 2026-10-16
+
+### Novo
+- No combate, uma seta dourada liga cada bloqueador à criatura que ele está bloqueando.
+- Marcadores e palavras-chave (Voar, Iniciativa, Resistência a Magia, Proteção…) nas cartas do campo viram ícones, com o número no caso dos marcadores. Passe o mouse ou toque no ícone para ver o nome.
+- O custo de mana de cada carta da mão aparece num selo em cima da carta, sem precisar passar o mouse.
+- Emblemas de planeswalker aparecem ao lado do retrato do jogador; passe o mouse para ver o texto.
+- **Importar lista** no montador de decks: cole a lista exportada do Arena, MTGO, Moxfield ou Archidekt (nomes em inglês ou português). Sideboard fica de fora, e o deck avisa quais cartas não foram encontradas.
+- Símbolos de mana X, híbridos e phyrexianos aparecem desenhados, em vez de bolinhas cinza.
+
+### Corrigido
+- Explore e outros efeitos que só revelam cartas não travam mais a partida: a carta aparece com um botão OK.
+- Cartas de duas faces e aventuras adicionadas ao deck (como Delver of Secrets ou Bonecrusher Giant) entram na partida normalmente.
+
 ## [0.2.0] - 2026-10-16
 
 ### Novo

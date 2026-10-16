@@ -140,3 +140,54 @@ export function saveUserDecks(decks: DeckData[]) {
 export const allDecks = (): DeckData[] => [...DEFAULT_DECKS, ...loadUserDecks()];
 export const deckSize = (d: DeckData) => d.cards.reduce((s, e) => s + e.count, 0);
 
+
+export interface ParsedList { main: DeckEntry[]; sideboard: number; skipped: string[] }
+
+/** Cabeçalhos de seção que aparecem nas exportações (Arena, MTGO, Moxfield, Archidekt). */
+const SECTION = /^(deck|main ?deck|mainboard|commanders?|companions?|sideboard|maybeboard|considering|tokens?)$/i;
+const OUT_OF_DECK = /^(sideboard|maybeboard|considering|tokens?)/i;
+
+/**
+ * Lê uma lista de deck em texto. Aceita "4 Nome", "4x Nome", "Nome" (1 cópia), coleção e número
+ * ("4 Nome (FDN) 123 *F*"), marcações do Archidekt ("[Removal]", "^Tag^"), "SB: 2 Nome" e comentários.
+ * Sideboard, maybeboard e fichas ficam de fora; no formato do MTGO, sem cabeçalhos, o que vem depois
+ * da primeira linha em branco é o sideboard.
+ */
+export function parseDeckList(text: string): ParsedList {
+  const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim());
+  const sectionOf = (l: string) => {
+    const h = l.replace(/^\/\/\s*/, '').replace(/\s*\(\d+\)\s*$/, '').replace(/:\s*$/, '').trim();
+    return SECTION.test(h) ? h : null;
+  };
+  const hasHeaders = lines.some(l => sectionOf(l));
+  const counts = new Map<string, DeckEntry>();
+  const skipped: string[] = [];
+  let sideboard = 0;
+  let out = false;
+  let seenCard = false;
+  for (const raw of lines) {
+    if (!raw) { if (!hasHeaders && seenCard) out = true; continue; }
+    const header = sectionOf(raw);
+    if (header) { out = OUT_OF_DECK.test(header); continue; }
+    if (/^(\/\/|#)/.test(raw) || /^(about|name)\s/i.test(raw)) continue;
+    const sb = /^SB:\s*/i.test(raw);
+    const m = raw.replace(/^SB:\s*/i, '').match(/^(?:(\d+)\s*x?\s+)?(.+)$/i);
+    if (!m) { skipped.push(raw); continue; }
+    const count = m[1] ? +m[1] : 1;
+    const tagged = /\[[^\]]*\b(sideboard|maybeboard)\b[^\]]*\]/i.test(m[2]);
+    const name = m[2]
+      .replace(/\s*\^[^^]*\^/g, '')            // ^Tag^ (Archidekt)
+      .replace(/\s*\[[^\]]*\]/g, '')           // [Categoria] (Archidekt)
+      .replace(/\s*\*[A-Z]+\*/g, '')           // *F* foil, *E* etched
+      .replace(/\s+\([A-Za-z0-9]{2,6}\)(\s+[\w★-]+)?\s*$/, '') // (SET) 123
+      .replace(/\s*\/\/\s*/g, ' // ')
+      .trim();
+    if (!name || count <= 0) { skipped.push(raw); continue; }
+    seenCard = true;
+    if (out || sb || tagged) { sideboard += count; continue; }
+    const key = name.toLowerCase();
+    const e = counts.get(key);
+    if (e) e.count += count; else counts.set(key, { name, count });
+  }
+  return { main: [...counts.values()], sideboard, skipped };
+}

@@ -225,7 +225,8 @@ final class Session {
 
         switch (ev.getMethod()) {
             case getChoices -> {
-                q.addProperty("kind", "choose");
+                // min/max -1: é um reveal() do Forge (Explore, revelar o topo...), só para mostrar as cartas.
+                q.addProperty("kind", (Integer) a[1] < 0 ? "reveal" : "choose");
                 q.addProperty("title", String.valueOf(a[0]));
                 q.addProperty("min", (Integer) a[1]);
                 q.addProperty("max", (Integer) a[2]);
