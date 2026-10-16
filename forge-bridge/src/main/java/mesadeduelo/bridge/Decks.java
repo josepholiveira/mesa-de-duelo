@@ -67,6 +67,12 @@ final class Decks {
             {"Kaito, Bane of Nightmares", "3"}, {"Shredder's Technique", "3"}, {"Donatello's Technique", "3"},
             {"Splinter's Technique", "1"},
         });
+        LISTS.put("coelhos", new String[][] {
+            {"Plains", "20"}, {"Patchwork Banner", "3"}, {"Gideon's Memorial", "2"},
+            {"Hare Apparent", "14"}, {"Valley Questcaller", "4"}, {"Harvestrite Host", "3"},
+            {"Warren Warleader", "2"}, {"Elspeth, Storm Slayer", "4"},
+            {"Caretaker's Talent", "3"}, {"Hop to It", "2"}, {"Get Lost", "3"},
+        });
     }
 
     /** Aceita o id de um deck padrão ou {name, cards:[{name, count}]} enviado pelo frontend. */

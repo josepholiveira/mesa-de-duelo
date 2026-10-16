@@ -1,11 +1,5 @@
-import type { DeckList } from './engine/game';
-import { toCardDef } from './engine/parse';
-import type { CardDef } from './engine/types';
-import { fetchByNames } from './scryfall';
-
 export interface DeckEntry { name: string; count: number }
-/** forgeOnly: o deck depende de cartas que só o motor do Forge entende (auras, por exemplo). */
-export interface DeckData { id: string; name: string; cards: DeckEntry[]; builtin?: boolean; forgeOnly?: boolean }
+export interface DeckData { id: string; name: string; cards: DeckEntry[]; builtin?: boolean }
 
 const BASICS = new Set(['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']);
 export const isBasic = (name: string) => BASICS.has(name);
@@ -41,7 +35,7 @@ export const DEFAULT_DECKS: DeckData[] = [
   },
   {
     // Mono-white auras (Standard): criaturas baratas e protegidas + auras que crescem com o número de encantamentos.
-    id: 'padrao-auras', name: 'Auras Brancas', builtin: true, forgeOnly: true,
+    id: 'padrao-auras', name: 'Auras Brancas', builtin: true,
     cards: [
       { name: 'Plains', count: 18 },
       // Criaturas (19)
@@ -57,7 +51,7 @@ export const DEFAULT_DECKS: DeckData[] = [
   },
   {
     // Izzet Spellementals (Standard, out/2026): mágicas baratas abastecem Sunderflock, Hearth Elemental e Eddymurk Crab.
-    id: 'padrao-izzet', name: 'Elementais Izzet', builtin: true, forgeOnly: true,
+    id: 'padrao-izzet', name: 'Elementais Izzet', builtin: true,
     cards: [
       { name: 'Island', count: 6 }, { name: 'Steam Vents', count: 4 }, { name: 'Spirebluff Canal', count: 4 },
       { name: 'Riverpyre Verge', count: 4 }, { name: 'Multiversal Passage', count: 1 }, { name: 'Stormcarved Coast', count: 1 },
@@ -72,7 +66,7 @@ export const DEFAULT_DECKS: DeckData[] = [
   },
   {
     // Mono-Green Landfall (Standard, out/2026): terrenos extras e gatilhos de landfall com Surrak e Mightform Harmonizer.
-    id: 'padrao-landfall', name: 'Landfall Verde', builtin: true, forgeOnly: true,
+    id: 'padrao-landfall', name: 'Landfall Verde', builtin: true,
     cards: [
       { name: 'Forest', count: 14 }, { name: 'Fabled Passage', count: 4 }, { name: 'Ba Sing Se', count: 3 },
       { name: 'Escape Tunnel', count: 4 }, { name: 'Sapling Nursery', count: 4 }, { name: 'Demolition Field', count: 1 },
@@ -86,7 +80,7 @@ export const DEFAULT_DECKS: DeckData[] = [
   },
   {
     // Dimir Midrange (Standard, out/2026): criaturas com flash e interação, fechando com Kaito, Bane of Nightmares.
-    id: 'padrao-dimir', name: 'Pesadelos Dimir', builtin: true, forgeOnly: true,
+    id: 'padrao-dimir', name: 'Pesadelos Dimir', builtin: true,
     cards: [
       { name: 'Island', count: 4 }, { name: 'Swamp', count: 4 }, { name: 'Watery Grave', count: 4 },
       { name: 'Gloomlake Verge', count: 4 }, { name: 'Hidden Lair', count: 3 }, { name: 'Restless Reef', count: 2 },
@@ -103,7 +97,7 @@ export const DEFAULT_DECKS: DeckData[] = [
   },
   {
     // Dimir Ninjas (Standard, out/2026): evasivos baratos abrem caminho para Sneak (TMNT) e o ninjutsu do Kaito.
-    id: 'padrao-ninjas', name: 'Ninjas das Sombras', builtin: true, forgeOnly: true,
+    id: 'padrao-ninjas', name: 'Ninjas das Sombras', builtin: true,
     cards: [
       { name: 'Island', count: 5 }, { name: 'Swamp', count: 5 }, { name: 'Watery Grave', count: 4 },
       { name: 'Gloomlake Verge', count: 4 }, { name: 'Hidden Lair', count: 2 }, { name: 'Restless Reef', count: 2 },
@@ -116,6 +110,21 @@ export const DEFAULT_DECKS: DeckData[] = [
       // Ninjutsu e técnicas
       { name: 'Kaito, Bane of Nightmares', count: 3 }, { name: "Shredder's Technique", count: 3 },
       { name: "Donatello's Technique", count: 3 }, { name: "Splinter's Technique", count: 1 },
+    ],
+  },
+  {
+    // Coelhos (Standard, out/2026): várias cópias de Hare Apparent, cada uma criando mais fichas; Elspeth, Storm Slayer dobra tudo.
+    id: 'padrao-coelhos', name: 'Toca dos Coelhos', builtin: true,
+    cards: [
+      { name: 'Plains', count: 20 },
+      // Ramp (5): Patchwork Banner nomeando Rabbit dá +1/+1 ao exército; Gideon's Memorial reforça as fichas e adianta a Elspeth.
+      { name: 'Patchwork Banner', count: 3 }, { name: "Gideon's Memorial", count: 2 },
+      // Criaturas (23)
+      { name: 'Hare Apparent', count: 14 }, { name: 'Valley Questcaller', count: 4 }, { name: 'Harvestrite Host', count: 3 },
+      { name: 'Warren Warleader', count: 2 },
+      // Planeswalker e mágicas (12)
+      { name: 'Elspeth, Storm Slayer', count: 4 }, { name: "Caretaker's Talent", count: 3 }, { name: 'Hop to It', count: 2 },
+      { name: 'Get Lost', count: 3 },
     ],
   },
 ];
@@ -131,19 +140,3 @@ export function saveUserDecks(decks: DeckData[]) {
 export const allDecks = (): DeckData[] => [...DEFAULT_DECKS, ...loadUserDecks()];
 export const deckSize = (d: DeckData) => d.cards.reduce((s, e) => s + e.count, 0);
 
-/** Resolve os nomes no Scryfall e devolve as cartas jogáveis; as não suportadas vão em `skipped`. */
-export async function resolveDeck(deck: DeckData): Promise<{ list: DeckList; skipped: string[]; defs: Map<string, CardDef> }> {
-  const found = await fetchByNames(deck.cards.map(e => e.name));
-  const cards: CardDef[] = [];
-  const skipped: string[] = [];
-  const defs = new Map<string, CardDef>();
-  for (const e of deck.cards) {
-    const sc = found.get(e.name.toLowerCase());
-    if (!sc) { skipped.push(`${e.name} (não encontrada)`); continue; }
-    const def = toCardDef(sc);
-    defs.set(e.name.toLowerCase(), def);
-    if (!def.supported) { skipped.push(`${e.name} (${def.problem})`); continue; }
-    for (let i = 0; i < e.count; i++) cards.push(def);
-  }
-  return { list: { name: deck.name, cards }, skipped, defs };
-}

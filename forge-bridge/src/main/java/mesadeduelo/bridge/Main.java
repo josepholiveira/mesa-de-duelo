@@ -54,6 +54,9 @@ public final class Main {
             prefs.setPref(FPref.ENFORCE_DECK_LEGALITY, "false");
             // Faz o Forge calcular e enviar as cartas que podem ser usadas agora (setWeaklySelectable).
             prefs.setPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
+            // A mesa só mostra campo de batalha e mão como cartas clicáveis. Com isto desligado, escolhas
+            // no grimório, cemitério ou exílio (buscar no grimório, reanimar...) chegam como pergunta com as cartas.
+            prefs.setPref(FPref.UI_SELECT_FROM_CARD_DISPLAYS, "false");
             return null;
         });
         System.out.printf("Forge inicializado em %d ms%n", System.currentTimeMillis() - t0);
@@ -129,7 +132,7 @@ public final class Main {
         }
 
         JsonObject publish() {
-            JsonObject state = StateJson.game(game.getView());
+            JsonObject state = StateJson.game(game.getView(), -1, game);
             server.broadcast(state.toString());
             return state;
         }

@@ -1,12 +1,23 @@
 import { DEFAULT_DECKS, deckSize, isBasic, loadUserDecks, saveUserDecks, type DeckData } from '../decks';
-import { toCardDef, type ScryCard } from '../engine/parse';
-import type { CardDef } from '../engine/types';
-import { cacheGet, fetchByNames, searchCards } from '../scryfall';
-import { describeCard, esc, manaHTML } from './cardtext';
+import { cardInfo, type CardInfo, type CardType } from '../cards';
+import { cacheGet, fetchByNames, searchCards, type ScryCard } from '../scryfall';
+import { esc, manaHTML, richText } from './cardtext';
 
 const MAX_COPIES = 4;
-const TYPE_ORDER = ['creature', 'instant', 'sorcery', 'land'] as const;
-const TYPE_PT = { creature: 'Criaturas', instant: 'Mágicas instantâneas', sorcery: 'Feitiços', land: 'Terrenos' };
+const NUMBERS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+
+/** Limite de cópias: 4, exceto terrenos básicos e cartas como Hare Apparent ("A deck can have any number of cards named…"). */
+function maxCopies(name: string, sc: ScryCard | null = cacheGet(name)) {
+  if (isBasic(name)) return 99;
+  const m = sc?.oracle_text?.match(/A deck can have (any number|up to (\w+)) cards named/i);
+  if (!m) return MAX_COPIES;
+  return m[2] ? NUMBERS[m[2].toLowerCase()] ?? MAX_COPIES : 99;
+}
+const TYPE_PT: Record<CardType, string> = {
+  creature: 'Criaturas', planeswalker: 'Planeswalkers', instant: 'Mágicas instantâneas', sorcery: 'Feitiços',
+  artifact: 'Artefatos', enchantment: 'Encantamentos', battle: 'Batalhas', other: 'Outras', land: 'Terrenos',
+};
+const TYPE_ORDER = Object.keys(TYPE_PT) as CardType[];
 
 export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onChange(): void }) {
   let user = loadUserDecks();
@@ -18,8 +29,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   let query = '';
   let searching = false;
   let error = '';
-  let hideUnsupported = true;
-  let hover: CardDef | null = null;
+  let hover: CardInfo | null = null;
 
   root.innerHTML = `
   <div class="builder">
@@ -37,8 +47,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
           <button class="arena-btn primary">Buscar</button>
         </form>
         <p class="tips">Sintaxe do Scryfall: <code>c:r</code> cor, <code>t:instant</code> tipo, <code>cmc&lt;=2</code> custo,
-          <code>s:fdn</code> coleção, <code>o:"draw a card"</code> texto.
-          <label><input type="checkbox" id="bHide" checked> Mostrar só cartas que o motor do navegador entende (no Forge todas funcionam)</label></p>
+          <code>s:fdn</code> coleção, <code>o:"draw a card"</code> texto.</p>
         <div id="bResults" class="results"></div>
       </section>
     </div>
@@ -47,7 +56,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
 
   const $ = (s: string) => root.querySelector(s) as HTMLElement;
   const current = (): DeckData => [...DEFAULT_DECKS, ...user].find(d => d.id === selected) ?? DEFAULT_DECKS[0];
-  const defOf = (name: string): CardDef | null => { const sc = cacheGet(name); return sc ? toCardDef(sc) : null; };
+  const defOf = (name: string): CardInfo | null => { const sc = cacheGet(name); return sc ? cardInfo(sc) : null; };
 
   function save() { saveUserDecks(user); opts.onChange(); }
 
@@ -60,7 +69,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   function renderEdit() {
     const d = current();
     const ro = !!d.builtin;
-    const groups = new Map<string, { e: DeckData['cards'][number]; def: CardDef | null }[]>();
+    const groups = new Map<string, { e: DeckData['cards'][number]; def: CardInfo | null }[]>();
     for (const e of d.cards) {
       const def = defOf(e.name);
       const k = def?.type ?? 'unknown';
@@ -72,12 +81,11 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
       const n = rows.reduce((s, r) => s + r.e.count, 0);
       return `<h3>${label} <small>${n}</small></h3><ul class="entries">${rows
         .sort((a, b) => (a.def?.cmc ?? 0) - (b.def?.cmc ?? 0) || a.e.name.localeCompare(b.e.name))
-        .map(({ e, def }) => `<li class="entry ${def && !def.supported ? 'bad' : ''}" data-hover="${esc(e.name)}">
+        .map(({ e, def }) => `<li class="entry" data-hover="${esc(e.name)}">
           <span class="count">${e.count}</span>
           <span class="ename" title="${esc(e.name)}">${esc(def?.label ?? e.name)}</span>
           <span class="ecost">${def ? manaHTML(def.manaCost) : ''}</span>
           ${ro ? '' : `<button class="mini" data-dec="${esc(e.name)}" aria-label="Remover uma">−</button><button class="mini" data-inc="${esc(e.name)}" aria-label="Adicionar uma">+</button>`}
-          ${def && !def.supported ? `<span class="why">Só no Forge (no navegador é ignorada): ${esc(def.problem ?? '')}</span>` : ''}
         </li>`).join('')}</ul>`;
     };
     const size = deckSize(d);
@@ -101,20 +109,18 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     if (error) { el.innerHTML = `<p class="note error">${esc(error)}</p>`; return; }
     if (!query) { el.innerHTML = '<p class="note">Digite uma busca para encontrar cartas.</p>'; return; }
     const d = current();
-    const items = results.map(sc => ({ sc, def: toCardDef(sc) })).filter(x => !hideUnsupported || x.def.supported);
-    const tiles = items.map(({ sc, def }) => {
+    const tiles = results.map(sc => ({ sc, def: cardInfo(sc) })).map(({ sc, def }) => {
       const have = d.cards.find(e => e.name === sc.name)?.count ?? 0;
-      const full = !isBasic(sc.name) && have >= MAX_COPIES;
+      const full = have >= maxCopies(sc.name, sc);
       const disabled = d.builtin || full;
-      return `<div class="result ${def.supported ? '' : 'bad'}" data-hover="${esc(sc.name)}">
+      return `<div class="result" data-hover="${esc(sc.name)}">
         ${def.imageSmall ? `<img src="${def.imageSmall}" alt="${esc(def.label)}" loading="lazy">` : `<div class="noimg">${esc(def.label)}</div>`}
         <div class="r-foot">
-          ${def.supported ? `<span class="ok">Funciona nos dois motores</span>` : `<span class="no" title="${esc(def.problem ?? '')}">Só no Forge: ${esc(def.problem ?? '')}</span>`}
           <button class="mini add" data-add="${esc(sc.name)}" ${disabled ? 'disabled' : ''}>${have ? `+ (${have})` : '+ Adicionar'}</button>
         </div>
       </div>`;
     }).join('');
-    el.innerHTML = `<p class="note">${total} resultado(s)${hideUnsupported ? `, ${items.length} suportado(s) nesta página` : ''}.</p>
+    el.innerHTML = `<p class="note">${total} resultado(s).</p>
       <div class="result-grid">${tiles}</div>
       ${hasMore ? `<button class="arena-btn secondary" data-b="more" ${searching ? 'disabled' : ''}>${searching ? 'Carregando…' : 'Mais resultados'}</button>` : ''}`;
   }
@@ -149,7 +155,7 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     if (d.builtin) return;
     const e = d.cards.find(x => x.name === name);
     if (e) {
-      e.count = Math.max(0, Math.min(isBasic(name) ? 99 : MAX_COPIES, e.count + delta));
+      e.count = Math.max(0, Math.min(maxCopies(name), e.count + delta));
       if (!e.count) d.cards.splice(d.cards.indexOf(e), 1);
     } else if (delta > 0) d.cards.push({ name, count: 1 });
     save(); render();
@@ -195,7 +201,6 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
   });
   root.addEventListener('change', e => {
     const t = e.target as HTMLInputElement;
-    if (t.id === 'bHide') { hideUnsupported = t.checked; renderResults(); }
     if (t.id === 'bName') { const d = current(); if (!d.builtin) { d.name = t.value.trim() || 'Sem nome'; save(); renderList(); } }
   });
   root.addEventListener('pointerover', e => {
@@ -205,9 +210,9 @@ export function mountDeckBuilder(root: HTMLElement, opts: { onBack(): void; onCh
     const def = defOf(el.dataset.hover!);
     if (!def || def === hover) return;
     hover = def;
-    const lines = def.supported ? describeCard(def) : [`Não suportada: ${def.problem}`];
+    const lines = def.image ? [] : def.text.split('\n').filter(Boolean);
     prev.innerHTML = `${def.image ? `<img src="${def.image}" alt="${esc(def.label)}">` : ''}
-      ${lines.length ? `<div class="preview-text">${lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>` : ''}`;
+      ${lines.length ? `<div class="preview-text">${lines.map(l => `<p>${richText(l)}</p>`).join('')}</div>` : ''}`;
     prev.hidden = false;
   });
   root.addEventListener('pointerleave', () => { $('#bPreview').hidden = true; hover = null; });

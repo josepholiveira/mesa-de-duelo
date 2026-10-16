@@ -1,14 +1,13 @@
 import { allDecks, deckSize, type DeckData } from '../decks';
 import { FORGE_URL } from '../forge/client';
-import { toCardDef } from '../engine/parse';
-import type { CardDef, Color } from '../engine/types';
+import { cardInfo, type CardInfo, type Color } from '../cards';
 import { cacheGet, fetchByNames } from '../scryfall';
 import { esc, pip } from './cardtext';
 
 const COLOR_ORDER: Color[] = ['W', 'U', 'B', 'R', 'G'];
 
-function cachedDefs(deck: DeckData): CardDef[] {
-  return deck.cards.flatMap(e => { const sc = cacheGet(e.name); return sc ? [toCardDef(sc)] : []; });
+function cachedDefs(deck: DeckData): CardInfo[] {
+  return deck.cards.flatMap(e => { const sc = cacheGet(e.name); return sc ? [cardInfo(sc)] : []; });
 }
 
 export function deckColors(deck: DeckData): Color[] {
@@ -31,9 +30,7 @@ export interface Lobby {
   showRoom(code: string | null): void;
 }
 
-export type Engine = 'local' | 'forge';
 type Mode = 'ai' | 'net';
-const ENGINE_KEY = 'mesa:engine';
 const MODE_KEY = 'mesa:mode';
 const NAME_KEY = 'mesa:name';
 const URL_KEY = 'mesa:forgeUrl';
@@ -46,7 +43,7 @@ function save(key: string, value: string) {
 }
 
 export interface LobbyOptions {
-  onPlay(you: DeckData, opp: DeckData, engine: Engine): void;
+  onPlay(you: DeckData, opp: DeckData): void;
   onHost(you: DeckData, name: string, url: string): void;
   onJoin(you: DeckData, name: string, code: string, url: string): void;
   onCancelRoom(): void;
@@ -56,7 +53,6 @@ export interface LobbyOptions {
 export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
   let youId = '';
   let oppId = 'random';
-  let engine: Engine = load(ENGINE_KEY) === 'forge' ? 'forge' : 'local';
   let mode: Mode = load(MODE_KEY) === 'net' ? 'net' : 'ai';
 
   root.innerHTML = `
@@ -74,11 +70,6 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
         <label><input type="radio" name="mode" value="net"> Em rede</label>
       </div>
       <div id="aiPanel">
-      <fieldset class="engine-pick">
-        <legend>Motor de regras</legend>
-        <label><input type="radio" name="engine" value="local"> <b>Navegador</b> <span>regras básicas, funciona sem instalar nada</span></label>
-        <label><input type="radio" name="engine" value="forge"> <b>Forge</b> <span>regras completas e qualquer carta; precisa da ponte rodando (<code>npm run forge</code>)</span></label>
-      </fieldset>
       <div class="lobby-row">
         <label for="oppSel">Oponente</label>
         <select id="oppSel"></select>
@@ -87,7 +78,7 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
       </div>
       </div>
       <div class="net-panel" id="netPanel" hidden>
-        <p class="net-help">Partida contra outra pessoa com o motor <b>Forge</b>. Quem cria a sala roda a ponte
+        <p class="net-help">Partida contra outra pessoa. Quem cria a sala roda a ponte
           aceitando conexões de fora (<code>npm run forge:rede</code>) e passa o código para o oponente.</p>
         <div class="net-fields">
           <label>Seu nome <input id="netName" maxlength="24" autocomplete="nickname" placeholder="Jogador"></label>
@@ -119,7 +110,7 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
         <span class="tile-art" ${art ? `style="background-image:url('${art}')"` : ''}></span>
         <span class="tile-info">
           <span class="tile-name">${esc(d.name)}</span>
-          <span class="tile-meta">${cols.map(pip).join('')}<span>${deckSize(d)} cartas${d.builtin ? '' : ' · seu deck'}${d.forgeOnly ? ' · só no Forge' : ''}</span></span>
+          <span class="tile-meta">${cols.map(pip).join('')}<span>${deckSize(d)} cartas${d.builtin ? '' : ' · seu deck'}</span></span>
         </span>
       </button>`;
     }).join('');
@@ -127,7 +118,6 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
     sel.innerHTML = `<option value="random">Aleatório</option>` +
       decks.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
     sel.value = decks.some(d => d.id === oppId) ? oppId : 'random';
-    root.querySelectorAll<HTMLInputElement>('input[name="engine"]').forEach(r => { r.checked = r.value === engine; });
     root.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach(r => { r.checked = r.value === mode; });
     $('#aiPanel').hidden = mode !== 'ai';
     $('#netPanel').hidden = mode !== 'net';
@@ -149,15 +139,8 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
       const decks = allDecks();
       const you = decks.find(d => d.id === youId)!;
       const pool = decks.filter(d => d.builtin && d.id !== youId);
-      const pool2 = engine === 'local' ? pool.filter(d => !d.forgeOnly) : pool;
-      const opp = oppId === 'random' ? pool2[Math.floor(Math.random() * pool2.length)] ?? you : decks.find(d => d.id === oppId)!;
-      if (engine === 'local' && (you.forgeOnly || opp.forgeOnly)) {
-        const d = you.forgeOnly ? you : opp;
-        $('#status').textContent = `"${d.name}" usa cartas que só o Forge entende. Escolha o motor Forge para jogar com ele.`;
-        $('#status').classList.add('error');
-        return;
-      }
-      opts.onPlay(you, opp, engine);
+      const opp = oppId === 'random' ? pool[Math.floor(Math.random() * pool.length)] ?? you : decks.find(d => d.id === oppId)!;
+      opts.onPlay(you, opp);
     }
   });
   root.addEventListener('submit', e => {
@@ -174,10 +157,6 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
   root.addEventListener('change', e => {
     const t = e.target as HTMLSelectElement;
     if (t.id === 'oppSel') oppId = t.value;
-    if (t.name === 'engine') {
-      engine = t.value === 'forge' ? 'forge' : 'local';
-      save(ENGINE_KEY, engine);
-    }
     if (t.name === 'mode') {
       mode = t.value === 'net' ? 'net' : 'ai';
       save(MODE_KEY, mode);

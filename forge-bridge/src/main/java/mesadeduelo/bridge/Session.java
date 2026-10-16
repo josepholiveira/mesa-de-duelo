@@ -261,9 +261,17 @@ final class Session {
                 q.add("options", optionsJson(options, null));
             }
             case order -> {
-                q.addProperty("kind", "order");
                 q.addProperty("title", String.valueOf(a[0]));
                 options.addAll((Collection<?>) a[4]);
+                int remMin = (Integer) a[2], remMax = (Integer) a[3];
+                if (remMin == 0 && remMax == 0) {
+                    q.addProperty("kind", "order");
+                } else {
+                    // many(): escolher um subconjunto (ex.: vidência "quais vão para o fundo"); os que sobram ficam de fora.
+                    q.addProperty("kind", "choose");
+                    q.addProperty("min", remMax < 0 ? 0 : Math.max(0, options.size() - remMax));
+                    q.addProperty("max", remMin < 0 ? options.size() : options.size() - remMin);
+                }
                 q.add("options", optionsJson(options, null));
             }
             case confirm -> {
@@ -364,10 +372,14 @@ final class Session {
             case showConfirmDialog -> q.args()[4];
             case showOptionDialog -> q.args()[4];
             case showInputDialog -> q.args()[3];
-            case order -> new IGuiGame.OrderResult<>(new ArrayList<>(q.options()), false);
+            case order -> new IGuiGame.OrderResult<>(isSubset(q) ? new ArrayList<>() : new ArrayList<>(q.options()), false);
             case getChoices, chooseEntitiesForEffect -> new ArrayList<>(q.options().subList(0, Math.min(q.options().size(), (Integer) (q.method() == ProtocolMethod.getChoices ? q.args()[1] : q.args()[2]))));
             default -> null;
         };
+    }
+
+    private static boolean isSubset(Question q) {
+        return (Integer) q.args()[2] != 0 || (Integer) q.args()[3] != 0;
     }
 
     /** Dano letal em cada bloqueador, na ordem; o resto vai para o defensor (atropelar) ou para o último bloqueador. */
@@ -436,7 +448,7 @@ final class Session {
                 state.addProperty("type", "lobby");
             } else {
                 PlayerView p = seat.me;
-                state = StateJson.game(gv, p == null ? -1 : p.getId());
+                state = StateJson.game(gv, p == null ? -1 : p.getId(), m.getGame());
                 state.addProperty("you", p == null ? -1 : p.getId());
                 JsonObject input = new JsonObject();
                 boolean locked = seat.buttonsLocked();
@@ -451,6 +463,8 @@ final class Session {
                 JsonArray act = new JsonArray();
                 seat.actionable.forEach(act::add);
                 input.add("actionable", act);
+                CardView promptCard = seat.promptCard;
+                if (promptCard != null) input.add("card", StateJson.card(promptCard));
                 state.add("input", input);
                 Question q = seat.question;
                 if (q != null) state.add("question", q.json());
@@ -533,6 +547,8 @@ final class Session {
 
         // Estado do "input" atual do Forge (prompt, botões e cartas selecionáveis).
         private volatile String message = "";
+        /** Carta citada pelo prompt (ex.: a do topo na vidência de 1); pode estar numa zona oculta. */
+        private volatile CardView promptCard;
         private volatile String okLabel = "", cancelLabel = "";
         private volatile boolean okEnabled, cancelEnabled;
         private volatile Set<Integer> selectable = Set.of();
@@ -562,7 +578,7 @@ final class Session {
         void send(String json) { BridgeServer.send(channel, json); }
 
         private void reset() {
-            message = ""; okLabel = cancelLabel = ""; okEnabled = cancelEnabled = false;
+            message = ""; promptCard = null; okLabel = cancelLabel = ""; okEnabled = cancelEnabled = false;
             selectable = Set.of(); actionable = Set.of(); rematch = false; question = null;
         }
 
@@ -594,6 +610,7 @@ final class Session {
                     }
                     case showPromptMessage -> {
                         message = a[1] == null ? "" : String.valueOf(a[1]);
+                        promptCard = a.length > 2 && a[2] instanceof CardView cv ? cv : null;
                         inputGen.incrementAndGet();
                     }
                     case updateButtons -> {

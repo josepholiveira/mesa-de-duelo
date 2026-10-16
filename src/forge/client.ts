@@ -15,11 +15,22 @@ export interface FCard {
   land?: boolean;
   power?: number;
   toughness?: number;
+  /** Poder/resistência sem bônus, marcadores nem efeitos. */
+  basePower?: number;
+  baseToughness?: number;
+  /** Palavras-chave atuais, com o nome do enum do Forge (FLYING, FIRST_STRIKE…), inclusive as ganhas por efeitos. */
+  keywords?: string[];
   damage?: number;
   sick?: boolean;
   attacking?: boolean;
   blocking?: boolean;
   counters?: Record<string, number>;
+  planeswalker?: boolean;
+  /** Id da carta a que esta aura ou equipamento está preso. */
+  attachedTo?: number;
+  attachedToPlayer?: number;
+  /** Nome original de uma carta que está copiando outra (Clone, por exemplo). */
+  copyOf?: string;
 }
 
 export interface FPlayer {
@@ -76,7 +87,8 @@ export interface FState {
   you: number;
   /** gen: versão do prompt; acompanha os cliques em OK/Cancelar para a ponte descartar cliques atrasados. */
   /** actionable: cartas que podem ser usadas agora (jogáveis, atacantes ou bloqueadores possíveis). */
-  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[] };
+  /** card: carta citada pelo prompt (ex.: a do topo do grimório na vidência ou na vigilância de 1). */
+  input: { gen: number; message: string; ok: FButton; cancel: FButton; selectable: number[]; actionable?: number[]; card?: FCard };
   question?: FQuestion;
   room?: FRoom;
   /** Para voltar a esta partida se a conexão cair: {type:"rejoin", code, token}. */

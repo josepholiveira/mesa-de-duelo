@@ -55,7 +55,7 @@ Pela raiz do projeto, os mesmos comandos são `npm run forge:instalar` e `npm ru
 }
 ```
 
-Cada carta tem: `id`, `name` (em inglês, usado para buscar a imagem no Scryfall), `set`, `manaCost`, `typeLine`, `text`, `creature`, `land`, `power`, `toughness`, `damage`, `tapped`, `sick`, `attacking`, `blocking` e `counters`.
+Cada carta tem: `id`, `name` (em inglês, usado para buscar a imagem no Scryfall), `set`, `manaCost`, `typeLine`, `text`, `creature`, `land`, `power`, `toughness`, `damage`, `tapped`, `sick`, `attacking`, `blocking` e `counters`. Quando se aplicam, também vêm `planeswalker: true`, `attachedTo` (id da carta a que uma aura ou equipamento está preso), `attachedToPlayer` (jogador encantado) e `copyOf` (nome original de uma carta que está copiando outra, como Clone). Criaturas trazem também `basePower`/`baseToughness` (sem bônus, marcadores nem efeitos). `keywords` lista as palavras-chave atuais, com os nomes do enum `Keyword` do Forge (`FLYING`, `FIRST_STRIKE`…), incluindo as palavras-chave ganhas por efeitos. Em `combat`, `defender` é o id do jogador ou do planeswalker atacado.
 
 `question` aparece quando o Forge precisa de uma decisão e a partida fica parada até a resposta:
 

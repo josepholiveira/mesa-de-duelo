@@ -41,7 +41,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     <div class="topbar">
       <button class="icon-btn" data-ui="menu" aria-label="Menu">☰</button>
       <button class="icon-btn" data-ui="log">Registro</button>
-      <span class="engine-tag">Motor: Forge<span class="room-tag" id="fRoomTag"></span></span>
+      <span class="room-tag" id="fRoomTag" hidden></span>
     </div>
     <div class="menu" id="fMenu" hidden>
       <button class="btn" data-ui="rematch" id="fMenuRematch">Recomeçar partida</button>
@@ -138,8 +138,41 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return b >= 0 ? { block: b + 1 } : {};
   }
 
-  function bfCard(s: FState, c: FCard) {
+  const COUNTER_LABEL: Record<string, string> = { P1P1: '+1/+1', M1M1: '-1/-1', LOYALTY: 'Lealdade', SHIELD: 'Escudo', STUN: 'Atordoar' };
+  const counterLabel = (k: string) => COUNTER_LABEL[k] ?? k.charAt(0) + k.slice(1).toLowerCase();
+
+  /** Palavras-chave que viram marcador na carta do campo. */
+  const KEYWORD_LABEL: Record<string, string> = {
+    FLYING: 'Voar', REACH: 'Alcance', TRAMPLE: 'Atropelar', MENACE: 'Ameaçar', FIRST_STRIKE: 'Iniciativa',
+    DOUBLE_STRIKE: 'Golpe Duplo', DEATHTOUCH: 'Toque Mortífero', LIFELINK: 'Vínculo com a Vida', VIGILANCE: 'Vigilância',
+    HASTE: 'Ímpeto', DEFENDER: 'Defensor', HEXPROOF: 'Resistência a Magia', SHROUD: 'Manto', WARD: 'Proteção contra Alvos',
+    INDESTRUCTIBLE: 'Indestrutível', PROTECTION: 'Proteção',
+  };
+  const keywordsOf = (c: FCard) => (c.keywords ?? []).filter(k => KEYWORD_LABEL[k]).map(k => KEYWORD_LABEL[k]);
+  /** Classe do número de P/T: verde acima da base, vermelho abaixo. */
+  const delta = (v: number, base: number | undefined) => (base === undefined || v === base ? '' : v > base ? 'up' : 'down');
+
+  /** Cartas do campo por id, para achar o alvo de um ataque ou a carta que uma aura encanta. */
+  const fieldCache = new WeakMap<FState, Map<number, FCard>>();
+  function battlefieldById(s: FState) {
+    let m = fieldCache.get(s);
+    if (!m) fieldCache.set(s, m = new Map(s.players.flatMap(p => p.battlefield).map(c => [c.id, c] as const)));
+    return m;
+  }
+
+  /** Auras e equipamentos agrupados pela carta a que estão presos (só quando ela está no campo). */
+  function attachmentsOf(s: FState) {
+    const byId = battlefieldById(s);
+    const m = new Map<number, FCard[]>();
+    for (const c of byId.values()) {
+      if (c.attachedTo != null && byId.has(c.attachedTo)) m.set(c.attachedTo, [...(m.get(c.attachedTo) ?? []), c]);
+    }
+    return m;
+  }
+
+  function bfCard(s: FState, c: FCard, attached: FCard[] = []) {
     const ci = combatIndex(s, c.id);
+    const byId = battlefieldById(s);
     const slot = ['slot'];
     if (c.tapped) slot.push('tapped');
     if (c.attacking || ci.attack) slot.push('attacking');
@@ -148,24 +181,50 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (usable(s, c.id)) inner.push('actionable');
     const dmg = c.damage ?? 0;
     if (dmg > (lastDamage.get(c.id) ?? 0)) inner.push('hit');
+    // Ataque a um planeswalker: o atacante mostra o alvo e o planeswalker mostra quem o ataca.
+    const target = ci.attack ? byId.get(s.combat[ci.attack - 1].defender ?? -1) : undefined;
+    const attackers = s.combat.map((x, i) => (x.defender === c.id ? i + 1 : 0)).filter(Boolean);
+    if (attackers.length) slot.push('attacked');
     let tag = '';
-    if (ci.attack) tag = `<span class="tag atk">${ICON_SWORD}${ci.attack}</span>`;
+    if (ci.attack) tag = `<span class="tag atk">${ICON_SWORD}${ci.attack}${target ? ` ▸ ${esc(label(target).split(',')[0])}` : ''}</span>`;
     else if (ci.block) tag = `<span class="tag blk">${ICON_SHIELD}${ci.block}</span>`;
+    else if (attackers.length) tag = `<span class="tag atk">Atacado ${ICON_SWORD}${attackers.join(',')}</span>`;
     else if (c.creature && c.sick && c.controller === s.activePlayer) tag = '<span class="tag zzz">zZ</span>';
+    const loyalty = c.planeswalker ? c.counters?.LOYALTY ?? 0 : undefined;
     const pt = c.creature
-      ? `<span class="pt"><b>${c.power}</b>/<b class="${dmg > 0 ? 'down' : ''}">${(c.toughness ?? 0) - dmg}</b></span>` : '';
-    const counters = c.counters && Object.keys(c.counters).length
-      ? `<span class="counters">${Object.entries(c.counters).map(([k, v]) => `${esc(k)} ×${v}`).join(' · ')}</span>` : '';
-    return `<div class="${slot.join(' ')}"><div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(label(c))}">${face(c, 'small')}${tag}${pt}${counters}</div></div>`;
+      ? `<span class="pt"><b class="${delta(c.power ?? 0, c.basePower)}">${c.power}</b>/<b class="${dmg > 0 ? 'down' : delta(c.toughness ?? 0, c.baseToughness)}">${(c.toughness ?? 0) - dmg}</b></span>`
+      : loyalty !== undefined ? `<span class="pt loyalty" title="Lealdade"><b>${loyalty}</b></span>` : '';
+    const shown = Object.entries(c.counters ?? {}).filter(([k]) => !(c.planeswalker && k === 'LOYALTY'));
+    const counters = shown.length
+      ? `<span class="counters">${shown.map(([k, v]) => `${esc(counterLabel(k))} ×${v}`).join(' · ')}</span>` : '';
+    const kws = c.creature ? keywordsOf(c) : [];
+    const kwHTML = kws.length ? `<span class="kws">${kws.map(k => `<span class="kw">${esc(k)}</span>`).join('')}</span>` : '';
+    const badges = [c.copyOf ? `<span class="badge copy" title="${esc(c.copyOf)} copiando ${esc(label(c))}">Cópia</span>` : '',
+      c.token ? '<span class="badge token">Ficha</span>' : ''].join('');
+    const aria = [label(c), c.copyOf ? `cópia feita por ${c.copyOf}` : '', c.token ? 'ficha' : '',
+      kws.join(', '), loyalty !== undefined ? `lealdade ${loyalty}` : '', attached.length ? `com ${attached.map(label).join(', ')}` : ''].filter(Boolean).join(', ');
+    const atts = attached.map((a, i) =>
+      `<div class="att${usable(s, a.id) ? ' actionable' : ''}" data-fid="${a.id}" role="button" tabindex="0" style="--i:${i + 1}" aria-label="${esc(label(a))}, presa a ${esc(label(c))}">${face(a, 'small')}</div>`).join('');
+    const style = attached.length ? ` style="--atts:${attached.length}"` : '';
+    if (attached.length) slot.push('has-att');
+    return `<div class="${slot.join(' ')}"${style}>${atts}<div class="${inner.join(' ')}" data-fid="${c.id}" role="button" tabindex="0" aria-label="${esc(aria)}">${face(c, 'small')}${badges}${tag}${kwHTML}${pt}${counters}</div></div>`;
+  }
+
+  /** Cartas de uma fileira, sem as auras/equipamentos (que vão desenhados junto da carta a que estão presos). */
+  function fieldRow(s: FState, cards: FCard[]) {
+    const atts = attachmentsOf(s);
+    const byId = battlefieldById(s);
+    return cards.filter(c => c.attachedTo == null || !byId.has(c.attachedTo)).map(c => bfCard(s, c, atts.get(c.id))).join('');
   }
 
   function landRow(s: FState, p: FPlayer) {
+    const atts = attachmentsOf(s);
     const groups = new Map<string, FCard[]>();
     for (const c of p.battlefield.filter(c => c.land && !c.creature)) {
-      const k = `${c.name}|${c.tapped}|${usable(s, c.id)}`;
+      const k = atts.has(c.id) ? `#${c.id}` : `${c.name}|${c.tapped}|${usable(s, c.id)}`;
       groups.set(k, [...(groups.get(k) ?? []), c]);
     }
-    return [...groups.values()].map(cs => `<div class="stack">${cs.map(c => bfCard(s, c)).join('')}</div>`).join('');
+    return [...groups.values()].map(cs => `<div class="stack">${cs.map(c => bfCard(s, c, atts.get(c.id))).join('')}</div>`).join('');
   }
 
   function avatar(s: FState, p: FPlayer, idx: number) {
@@ -291,8 +350,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     $('#fMePiles').innerHTML = piles(me);
     $('#fOppLands').innerHTML = landRow(s, opp);
     $('#fMeLands').innerHTML = landRow(s, me);
-    $('#fOppCreatures').innerHTML = opp.battlefield.filter(c => !c.land || c.creature).map(c => bfCard(s, c)).join('');
-    $('#fMeCreatures').innerHTML = me.battlefield.filter(c => !c.land || c.creature).map(c => bfCard(s, c)).join('');
+    $('#fOppCreatures').innerHTML = fieldRow(s, opp.battlefield.filter(c => !c.land || c.creature));
+    $('#fMeCreatures').innerHTML = fieldRow(s, me.battlefield.filter(c => !c.land || c.creature));
 
     const n = me.hand.length;
     $('#fHand').innerHTML = me.hand.map((c, i) => {
@@ -310,7 +369,11 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     $('#fPhases').innerHTML = `<div class="turn-no">Turno ${s.turn}</div>` + PHASES.map(([k, l]) =>
       `<div class="ph ${group === k ? 'on' : ''} ${s.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
 
-    $('#fAction').innerHTML = `<div class="prompt">${richText(s.input.message).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`;
+    // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
+    const pc = s.input.card;
+    const promptCard = pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
+      ? `<div class="prompt-card" data-peek="${pc.id}">${face(pc, 'normal')}</div>` : '';
+    $('#fAction').innerHTML = `${promptCard}<div class="prompt">${richText(s.input.message).replace(/\n/g, '<br>')}</div><div class="btns">${buttons(s)}</div>`;
     $('#fLog').innerHTML = s.log.map(l => `<li>${esc(l)}</li>`).join('');
 
     const qEl = $('#fQuestion');
@@ -332,7 +395,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       bannerTimer = window.setTimeout(() => { el.hidden = true; }, 1300);
     }
 
-    $('#fRoomTag').textContent = s.room ? ` · Sala ${s.room.code}` : '';
+    $('#fRoomTag').textContent = s.room ? `Sala ${s.room.code}` : '';
+    $('#fRoomTag').hidden = !s.room;
     // Em rede não dá para recomeçar no meio: a revanche só existe no fim da partida, com os dois de acordo.
     $('#fMenuRematch').hidden = !!s.room;
 
@@ -373,21 +437,37 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     return other.rematch ? `<p class="q-hint">${esc(other.name)} quer jogar de novo.</p>` : '';
   }
 
-  function findCard(id: number): FCard | undefined {
+  function findCard(id: number, withPrompt = true): FCard | undefined {
     const s = client?.state;
     if (!s) return undefined;
     for (const p of s.players) {
       for (const c of [...p.hand, ...p.battlefield, ...p.graveyard, ...p.exile]) if (c.id === id) return c;
     }
-    return s.stack.find(si => si.source?.id === id)?.source;
+    const onStack = s.stack.find(si => si.source?.id === id)?.source;
+    if (onStack) return onStack;
+    return withPrompt && s.input.card?.id === id ? s.input.card : undefined;
   }
+
+  const s0 = () => client?.state;
 
   function showPreview(c: FCard | undefined) {
     const el = $('#fPreview');
     if (!c || c.faceDown || !c.name) { el.hidden = true; return; }
     const text = ptOf(c.name)?.text || c.text;
+    const host = c.attachedTo != null ? findCard(c.attachedTo) : undefined;
+    const enchantedPlayer = s0()?.players.find(p => p.id === c.attachedToPlayer);
+    const atts = (s0()?.players ?? []).flatMap(p => p.battlefield).filter(a => a.attachedTo === c.id);
+    const notes = [
+      c.copyOf ? `<b>${esc(c.copyOf)}</b> copiando esta carta.` : '',
+      c.token ? 'Ficha.' : '',
+      c.creature && keywordsOf(c).length ? `<b>${esc(keywordsOf(c).join(', '))}</b>.` : '',
+      c.creature && c.basePower !== undefined && (c.power !== c.basePower || c.toughness !== c.baseToughness)
+        ? `Base ${c.basePower}/${c.baseToughness}, agora ${c.power}/${c.toughness}.` : '',
+      host ? `Presa a <b>${esc(label(host))}</b>.` : enchantedPlayer ? `Encantando <b>${esc(enchantedPlayer.name)}</b>.` : '',
+      atts.length ? `Com ${atts.map(a => `<b>${esc(label(a))}</b>`).join(', ')}.` : '',
+    ].filter(Boolean).map(n => `<p class="preview-note">${n}</p>`).join('');
     el.innerHTML = `<div class="preview-card">${face(c, 'normal')}</div>
-      ${text ? `<div class="preview-text"><p>${richText(text).replace(/\n/g, '<br>')}</p></div>` : ''}`;
+      ${text || notes ? `<div class="preview-text">${notes}${text ? `<p>${richText(text).replace(/\n/g, '<br>')}</p>` : ''}</div>` : ''}`;
     el.hidden = false;
   }
 

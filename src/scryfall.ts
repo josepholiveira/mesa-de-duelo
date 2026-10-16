@@ -1,4 +1,21 @@
-import type { ScryCard } from './engine/parse';
+/** Subconjunto dos campos do Scryfall que o jogo usa. */
+export interface ScryCard {
+  name: string;
+  layout: string;
+  mana_cost?: string;
+  type_line: string;
+  oracle_text?: string;
+  power?: string;
+  toughness?: string;
+  colors?: string[];
+  color_identity?: string[];
+  image_uris?: { small?: string; normal?: string; art_crop?: string };
+  faces?: boolean;
+  /** Impressão em português, quando existe. */
+  pt?: { name?: string; type_line?: string; text?: string; image_uris?: { small?: string; normal?: string; art_crop?: string } };
+  /** Já procuramos a impressão em português (achando ou não). */
+  ptChecked?: boolean;
+}
 
 /**
  * Cliente mínimo da API do Scryfall (https://scryfall.com/docs/api).
