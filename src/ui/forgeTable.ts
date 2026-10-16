@@ -7,23 +7,18 @@ import { canFullscreen, toggleFullscreen } from './landscape';
 import { inspectCard, showCardPreview, hideCardPreview } from './cardInspector';
 import { PresentationTimeline, presentationDuration, hasLiveDecision, stateWithFrame, type PresentationEvent, type PresentationFrame } from './presentationTimeline';
 import { createGameAudio } from './audio';
+import { AutoPassPreference } from './autoPassPreference';
 import { attachHandDrag } from './handDrag';
 import { exileShelfCards, canPlayExileCard, validBlockSelection, legalBlockTargets, blockPairAction, selectedForInput, canSelectExileCard, type BlockSelection } from './playContext';
 import { applyOpeningPresentation, suppressOpeningPreview } from './openingPresentation';
+import { cardDecision, selectionMessage } from './decisionPrompt';
 import type { DeckEntry } from '../decks';
+import { phaseHudHTML } from './phaseHud';
+import { stackPresentation } from './stackPresentation';
 import './gameplay.css';
-
-/** Fases do Forge agrupadas nas sete etapas mostradas na lateral. */
-const PHASE_GROUP: Record<string, string> = {
-  UNTAP: 'untap', UPKEEP: 'upkeep', DRAW: 'draw', MAIN1: 'main1',
-  COMBAT_BEGIN: 'combat', COMBAT_DECLARE_ATTACKERS: 'combat', COMBAT_DECLARE_BLOCKERS: 'combat',
-  COMBAT_FIRST_STRIKE_DAMAGE: 'combat', COMBAT_DAMAGE: 'combat', COMBAT_END: 'combat',
-  MAIN2: 'main2', END_OF_TURN: 'end', CLEANUP: 'end',
-};
-const PHASES = [
-  ['untap', 'Desvirar'], ['upkeep', 'Manutenção'], ['draw', 'Compra'], ['main1', 'Principal 1'],
-  ['combat', 'Combate'], ['main2', 'Principal 2'], ['end', 'Final'],
-] as const;
+import './phaseHud.css';
+import './gameOptions.css';
+import './decisionPrompt.css';
 
 const ICON_SWORD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3H21v6.5L10 20.5l-2 .5-.5-2L18.5 8V5.5H16L5 16.5 3.5 15z" fill="currentColor"/></svg>';
 const ICON_SHIELD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z" fill="currentColor"/></svg>';
@@ -82,25 +77,29 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   <div class="arena forge">
     <div class="mat" aria-hidden="true"></div>
     <div class="topbar">
-      <button class="icon-btn" data-ui="menu" aria-label="Menu">☰</button>
-      <button class="icon-btn" data-ui="log">Registro</button>
+      <button class="icon-btn game-menu-trigger" data-ui="menu" aria-expanded="false" aria-controls="fMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Menu</span></button>
       <button class="icon-btn fs-btn" data-ui="fullscreen" aria-label="Tela cheia" title="Tela cheia"${canFullscreen() ? '' : ' hidden'}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="fs-enter" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path class="fs-exit" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
       </button>
-      <button class="icon-btn" data-ui="settings" aria-expanded="false" aria-controls="fSettings">Som e ritmo</button>
-      <span class="room-tag" id="fRoomTag" hidden></span><span class="series-score" id="fSeries" hidden></span>
     </div>
-    <div class="menu" id="fMenu" hidden>
+    <nav class="menu game-menu" id="fMenu" aria-label="Menu da partida" hidden>
+      <div class="game-menu-meta"><span class="room-tag" id="fRoomTag" hidden></span><span class="series-score" id="fSeries" hidden></span></div>
+      <button class="btn" data-ui="log" aria-expanded="false" aria-controls="fLogDrawer">Registro</button>
+      <button class="btn" data-ui="settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="fSettings">Opções</button>
+      <div class="game-menu-divider" aria-hidden="true"></div>
       <button class="btn" data-ui="rematch" id="fMenuRematch">Recomeçar partida</button>
       <button class="btn" data-ui="exit">Desistir e voltar ao início</button>
+    </nav>
+    <div class="overlay game-options-overlay" id="fSettings" hidden>
+      <section class="game-options" role="dialog" aria-modal="true" aria-labelledby="fSettingsTitle">
+        <header class="game-options-heading"><h2 id="fSettingsTitle">Opções</h2><button class="icon-btn game-options-close" data-ui="settings-close" aria-label="Fechar opções"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+        <div class="game-option-row"><span id="fSoundLabel">Efeitos sonoros</span><button class="sound-switch" id="fMute" data-ui="mute" role="switch" aria-checked="false" aria-labelledby="fSoundLabel"><span class="sound-switch-track" aria-hidden="true"><span></span></span><span id="fSoundState" aria-hidden="true">Desligados</span></button></div>
+        <div class="game-option-volume"><div class="game-option-row"><label for="fVolume">Volume</label><output id="fVolumeValue" for="fVolume">35%</output></div><input id="fVolume" type="range" min="0" max="100" step="5" value="35" aria-valuetext="35%"></div>
+        <div class="game-option-auto-pass"><div class="game-option-row"><span id="fAutoPassLabel">Passar automaticamente</span><button class="sound-switch" id="fAutoPass" data-ui="auto-pass" role="switch" aria-checked="true" aria-labelledby="fAutoPassLabel" aria-describedby="fAutoPassHint fAutoPassStatus" disabled><span class="sound-switch-track" aria-hidden="true"><span></span></span><span id="fAutoPassState" aria-hidden="true">Ativado</span></button></div><p id="fAutoPassHint">Quando não houver ações disponíveis. As jogadas continuam visíveis.</p><p id="fAutoPassStatus" role="status">Aguardando conexão com o servidor.</p></div>
+        <div class="game-option-pace"><label for="fPace">Ritmo das jogadas</label><select id="fPace" aria-describedby="fPaceHint"><option value="normal">Normal</option><option value="fast">Rápido sem resposta</option></select><p id="fPaceHint">Acelere as animações quando não houver uma decisão sua. Suas respostas continuam disponíveis imediatamente.</p></div>
+        <footer><button class="arena-btn secondary" data-ui="settings-close">Voltar à partida</button></footer>
+      </section>
     </div>
-    <section class="game-settings" id="fSettings" aria-label="Som e ritmo da partida" hidden>
-      <div class="setting-line"><h2>Som e ritmo</h2><button class="icon-btn" data-ui="settings" aria-label="Fechar configurações">Fechar</button></div>
-      <div class="setting-line"><label for="fMute">Efeitos sonoros</label><button class="icon-btn" id="fMute" data-ui="mute" aria-pressed="true">Desligados</button></div>
-      <label for="fVolume">Volume <input id="fVolume" type="range" min="0" max="100" step="5" value="35"></label>
-      <label for="fPace">Ritmo das jogadas <select id="fPace"><option value="normal">Normal</option><option value="fast">Rápido sem resposta</option></select></label>
-      <p>O ritmo afeta a apresentação. Suas respostas ficam disponíveis assim que o jogo permite.</p>
-    </section>
     <aside class="log-drawer" id="fLogDrawer" hidden><div class="stack-heading"><h2>Histórico da partida</h2><button class="icon-btn" data-ui="log" aria-label="Fechar histórico">Fechar</button></div><ul id="fLog"></ul></aside>
 
     <div class="opp-hand" id="fOppHand"></div>
@@ -165,6 +164,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   let sideboardBusy = false;
   const timeline = new PresentationTimeline();
   const audio = createGameAudio();
+  const autoPass = new AutoPassPreference(message => { if (client?.connected && !disconnected) client.send(message); });
   let presentationTimer = 0;
   let displayFrame: PresentationFrame | null = null;
   let silentNext = true;
@@ -183,13 +183,48 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   const selectedBadge = (s: FState, c: FCard) => selectedForInput(s, c.id) ? '<span class="choice-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span>' : '';
   const inspectButton = (c: FCard) => !c.faceDown && c.name ? `<button class="inspect-card" data-inspect="${c.id}" aria-label="Inspecionar ${esc(label(c))}">${inspectIcon}</button>` : '';
 
+  function syncAutoPass() {
+    const connected = !!client?.connected && !disconnected;
+    const control = $('#fAutoPass') as HTMLButtonElement;
+    control.disabled = !connected || !autoPass.supported;
+    control.setAttribute('aria-checked', String(autoPass.value));
+    $('#fAutoPassState').textContent = autoPass.value ? 'Ativado' : 'Desativado';
+    const status = $('#fAutoPassStatus');
+    status.textContent = !connected ? 'Aguardando conexão com o servidor.' : !autoPass.supported ? 'Este servidor não oferece esta opção.' : autoPass.pending !== null ? 'Aplicando…' : '';
+    status.hidden = !status.textContent;
+  }
   function syncSettings() {
     const settings = audio.settings;
     const mute = $('#fMute');
-    mute.textContent = settings.muted ? 'Desligados' : 'Ligados';
-    mute.setAttribute('aria-pressed', String(!settings.muted));
-    ($('#fVolume') as HTMLInputElement).value = String(Math.round(settings.volume * 100));
+    $('#fSoundState').textContent = settings.muted ? 'Desligados' : 'Ligados';
+    mute.setAttribute('aria-checked', String(!settings.muted));
+    const volume = Math.round(settings.volume * 100);
+    ($('#fVolume') as HTMLInputElement).value = String(volume);
+    $('#fVolume').setAttribute('aria-valuetext', `${volume}%`);
+    $('#fVolumeValue').textContent = `${volume}%`;
     ($('#fPace') as HTMLSelectElement).value = fast ? 'fast' : 'normal';
+    syncAutoPass();
+  }
+  function setMenu(open: boolean, restore = false) {
+    $('#fMenu').hidden = !open;
+    const trigger = root.querySelector<HTMLElement>('[data-ui="menu"]')!;
+    trigger.setAttribute('aria-expanded', String(open));
+    if (open) $('#fMenu').querySelector<HTMLElement>('button:not([hidden])')?.focus({ preventScroll: true });
+    else if (restore) trigger.focus({ preventScroll: true });
+  }
+  function setLog(open: boolean, restore = false) {
+    $('#fLogDrawer').hidden = !open;
+    root.querySelector('[aria-controls="fLogDrawer"]')?.setAttribute('aria-expanded', String(open));
+    if (open) { setMenu(false); $('#fLogDrawer').querySelector<HTMLElement>('button')?.focus({ preventScroll: true }); }
+    else if (restore) root.querySelector<HTMLElement>('[data-ui="menu"]')?.focus({ preventScroll: true });
+  }
+  function setSettings(open: boolean) {
+    if (open) {
+      setMenu(false, true); setLog(false); hideCardPreview(true); syncSettings();
+    }
+    $('#fSettings').hidden = !open;
+    root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', String(open));
+    syncModal();
   }
   syncSettings();
   const handDrag = attachHandDrag(root, {
@@ -215,7 +250,12 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (next instanceof HTMLInputElement && saved.start !== null && saved.end !== null && next.type !== 'number') next.setSelectionRange(saved.start, saved.end);
   }
   function syncModal() {
-    const active = ['#fOverlay', '#fQuestion', '#fZone', '#fStackGallery'].map(id => $(id)).find(el => !el.hidden) ?? null;
+    const required = ['#fOverlay', '#fQuestion', '#fZone', '#fStackGallery'].map(id => $(id)).find(el => !el.hidden) ?? null;
+    if (required && !$('#fSettings').hidden) {
+      $('#fSettings').hidden = true;
+      root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', 'false');
+    }
+    const active = required ?? (!$('#fSettings').hidden ? $('#fSettings') : null);
     const previousModal = currentModal;
     if (active !== currentModal) {
       if (!currentModal && active) returnFocus = document.activeElement as HTMLElement | null;
@@ -431,7 +471,8 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       for (const id of t.cards ?? []) { const to = targetRect('c', id); if (to) links.push({ from, to, cls }); }
       for (const id of t.players ?? []) { const to = targetRect('p', id); if (to) links.push({ from, to, cls }); }
     };
-    s.stack.forEach(si => {
+    const stack = client?.state ? stackPresentation(client.state, timeline.current?.event).stack : s.stack;
+    stack.forEach(si => {
       const from = q(`#fStack [data-stack="${si.id}"]`) ?? (si.source ? q(`.field [data-fid="${si.source.id}"]`) : undefined);
       add(from, si.targets, si.controller === s.you ? 'mine' : 'theirs');
     });
@@ -459,6 +500,21 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (svg.dataset.html !== html) { svg.innerHTML = html; svg.dataset.html = html; }
   }
 
+  function layoutCardDecision() {
+    const arena = root.querySelector<HTMLElement>('.arena')!;
+    const action = $('#fAction');
+    arena.style.removeProperty('grid-template-rows');
+    action.style.removeProperty('max-height');
+    if (!arena.classList.contains('has-hand-decision')) return;
+    // Keep the whole choice scrollable between the phase track and the actual hand.
+    const header = getComputedStyle(arena).gridTemplateRows.split(' ')[0];
+    const hand = $('#fHand').getBoundingClientRect();
+    const phaseBottom = $('#fPhases').getBoundingClientRect().bottom;
+    action.style.maxHeight = `${Math.max(0, hand.top - 8 - phaseBottom - 12)}px`;
+    const bottom = arena.getBoundingClientRect().bottom - action.getBoundingClientRect().top + 8;
+    arena.style.gridTemplateRows = `${header} minmax(0, 1fr) 2px minmax(0, 1fr) ${Math.max(hand.height, bottom)}px`;
+  }
+
   function layoutStack() {
     const arena = root.querySelector<HTMLElement>('.arena')!;
     const panel = $('#fStack');
@@ -470,22 +526,33 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (!pile) return;
     const action = $('#fAction').getBoundingClientRect();
     const natural = panel.getBoundingClientRect();
-    if (natural.bottom + 12 <= action.top) return;
     const arenaBox = arena.getBoundingClientRect();
     const phases = $('#fPhases').getBoundingClientRect();
     const topSafe = phases.height ? phases.bottom - arenaBox.top + 12 : 60;
-    const available = Math.max(70, action.top - arenaBox.top - topSafe - 18);
+    const overlapsAction = natural.right > action.left - 12 && natural.left < action.right + 12;
+    const bottomSafe = overlapsAction ? action.top - arenaBox.top - 18 : arenaBox.height - 18;
+    if (natural.top - arenaBox.top >= topSafe && natural.bottom - arenaBox.top <= bottomSafe) return;
+    if (natural.height <= bottomSafe - topSafe) {
+      const top = Math.max(topSafe, Math.min(natural.top - arenaBox.top, bottomSafe - natural.height));
+      panel.style.top = `${top}px`;
+      panel.style.transform = 'none';
+      return;
+    }
+    const pileBox = pile.getBoundingClientRect();
+    const fanTop = Math.min(pileBox.top, ...[...pile.querySelectorAll('.stack-layer')].map(layer => layer.getBoundingClientRect().top));
+    const overhang = Math.max(38, pileBox.top - fanTop);
+    const available = Math.max(70, bottomSafe - topSafe - overhang);
     const width = Math.min(pile.getBoundingClientRect().width, available * 488 / 680);
     arena.classList.add('stack-tight');
     arena.style.setProperty('--stack-active-width', `${width}px`);
     panel.style.setProperty('--stack-width', `${width}px`);
-    panel.style.top = `${action.top - arenaBox.top - width * 680 / 488 - 18}px`;
+    panel.style.top = `${Math.max(topSafe + overhang, bottomSafe - width * 680 / 488)}px`;
     panel.style.transform = 'none';
   }
 
   window.addEventListener('resize', () => {
     const s = client?.state;
-    if (s?.type === 'state' && !root.hidden) { layoutExileShelf(); layoutStack(); const visual = stateWithFrame(s, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); }
+    if (s?.type === 'state' && !root.hidden) { layoutExileShelf(); layoutCardDecision(); layoutStack(); const visual = stateWithFrame(s, displayFrame); drawBlockArrows(visual); drawTargetArrows(visual); }
   });
 
   const COUNTER_LABEL: Record<string, string> = { P1P1: '+1/+1', M1M1: '-1/-1', LOYALTY: 'Lealdade', SHIELD: 'Escudo', STUN: 'Atordoar' };
@@ -703,15 +770,15 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function stackFace(si: FState['stack'][number]) {
     return si.source ? face(si.source, 'normal') : `<div class="stack-effect-face"><span>Efeito na pilha</span><p>${richText(si.text)}</p></div>`;
   }
-  function stackPanel(s: FState) {
+  function stackPanel(s: FState, replaying = false) {
     const count = s.stack.length;
     const top = s.stack[0];
     if (!top) return '';
     return `<div class="stack-heading"><h2>Pilha</h2><span class="stack-count">${count}</span></div>
-      <button class="stack-pile" data-ui="stack-open" data-stack="${top.id}" data-gen="${s.input.gen}" aria-haspopup="dialog" aria-expanded="${stackGalleryOpen}" aria-controls="fStackGallery" aria-label="Abrir a pilha: ${count} ${count === 1 ? 'efeito' : 'efeitos'}. ${top.source ? esc(label(top.source)) : 'O efeito do topo'} resolve primeiro.">
-        ${s.stack.slice(0, 4).map((si, i) => `<div class="stack-layer ${si.controller === s.you ? 'mine' : 'theirs'}${s.input.selectableStacks?.includes(si.id) ? ' actionable' : ''}" style="--depth:${i}" ${i ? `data-stack="${si.id}"` : ''} aria-hidden="true">${stackFace(si)}</div>`).join('')}
-        <span class="stack-top-label">Resolve primeiro</span>
-      </button><span class="stack-open-hint">Clique para ver a pilha</span>`;
+      <button class="stack-pile" data-ui="${replaying ? 'stack-replay' : 'stack-open'}" data-stack="${top.id}" ${replaying ? 'data-stack-replay' : `data-gen="${s.input.gen}" aria-haspopup="dialog" aria-expanded="${stackGalleryOpen}" aria-controls="fStackGallery"`} aria-label="${replaying ? `Inspecionar ${top.source ? esc(label(top.source)) : 'efeito'}. Reprodução de uma jogada já processada; não está mais na pilha.` : `Abrir a pilha: ${count} ${count === 1 ? 'efeito' : 'efeitos'}. ${top.source ? esc(label(top.source)) : 'O efeito do topo'} resolve primeiro.`}">
+        ${s.stack.slice(0, 4).map((si, i) => `<div class="stack-layer ${si.controller === s.you ? 'mine' : 'theirs'}${!replaying && s.input.selectableStacks?.includes(si.id) ? ' actionable' : ''}" style="--depth:${i}" ${i ? `data-stack="${si.id}"` : ''} aria-hidden="true">${stackFace(si)}</div>`).join('')}
+        <span class="stack-top-label">${replaying ? 'Jogada recente' : 'Resolve primeiro'}</span>
+      </button><span class="stack-open-hint">${replaying ? 'Clique para inspecionar' : 'Clique para ver a pilha'}</span>`;
   }
   function renderStackGallery(s: FState) {
     if (!stackGalleryOpen) return;
@@ -743,13 +810,14 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function renderActivity() {
     const authoritative = client?.state;
     if (!authoritative) return;
-    const s = stateWithFrame(authoritative, displayFrame);
+    const presentation = stackPresentation(authoritative, timeline.current?.event);
+    const s = { ...authoritative, stack: presentation.stack };
     const el = $('#fStack');
     const focused = focusSnapshot();
     const scrollTop = el.scrollTop;
     el.hidden = !s.stack.length;
     root.querySelector('.forge')!.classList.toggle('has-stack', !!s.stack.length);
-    setHTML(el, s.stack.length ? stackPanel(s) : '');
+    setHTML(el, s.stack.length ? stackPanel(s, presentation.replaying) : '');
     el.scrollTop = scrollTop;
     renderStackGallery(authoritative);
     // Optional drawer only: ordinary draws and priority changes never crowd the table.
@@ -782,15 +850,16 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
   function buttons(s: FState) {
     if (s.gameOver || s.question) return '';
+    const decision = cardDecision(s);
     const handCount = s.players.find(p => p.id === s.you)?.hand.length ?? 0;
     const ok = s.input.suspendCast ? { ...s.input.ok, label: 'Conjurar agora' } : s.input.blocking ? { ...s.input.ok, label: 'Confirmar bloqueios' } : s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
-      : s.input.opening === 'mulligan' ? { ...s.input.ok, label: `Manter ${handCount}` } : s.input.ok;
+      : s.input.opening === 'mulligan' ? { ...s.input.ok, label: `Manter ${handCount}` } : decision ? { ...s.input.ok, label: 'Confirmar seleção' } : s.input.ok;
     const cancel = s.input.suspendCast ? { ...s.input.cancel, label: 'Deixar no exílio' } : s.input.opening === 'play-draw' ? { ...s.input.cancel, label: 'Oponente joga' } : s.input.cancel;
     const waiting = clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS;
     const b = (act: string, btn: { label: string; enabled: boolean }, kind: string) =>
       btn.label ? `<button class="arena-btn ${kind}" data-act="${act}" data-gen="${s.input.gen}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
     const mine = s.activePlayer === s.you;
-    if (!ok.enabled && !cancel.enabled) return `<button class="arena-btn waiting" disabled>${s.input.opening ? 'Aguardando confirmação…' : mine ? 'Aguardando o jogo…' : 'Oponente jogando…'}</button>`;
+    if (!ok.enabled && !cancel.enabled) return decision ? '' : `<button class="arena-btn waiting" disabled>${s.input.opening ? 'Aguardando confirmação…' : mine ? 'Aguardando o jogo…' : 'Oponente jogando…'}</button>`;
     const endTurn = !!s.input.priority && ok.enabled && mine && !s.stack.length && !s.input.targeting && !s.input.paying;
     const undo = endTurn && /fim de turno|end turn/i.test(cancel.label) ? '' : b('cancel', cancel, 'secondary');
     const priority = s.input.priority ? { ...ok, label: 'Passar prioridade' } : ok;
@@ -879,6 +948,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function renderTable(ingest: boolean) {
     const s = client?.state;
     if (!s || s.type !== 'state') return;
+    autoPass.observe(s.preferences, !!client?.connected && !disconnected); syncAutoPass();
     const savedFocus = focusSnapshot();
     const scrollPositions = new Map([...root.querySelectorAll<HTMLElement>('.row, .hand, .exile-shelf-track')].map(el => [el.id, el.scrollLeft]));
     const silently = silentNext || document.hidden;
@@ -933,14 +1003,11 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     renderExileShelf(s);
     renderActivity();
 
-    const group = PHASE_GROUP[visual.phase ?? ''] ?? '';
     // De quem é o turno: etiqueta no trilho de fases e brilho na metade da mesa do jogador ativo.
     const active = s.gameOver ? null : visual.activePlayer === me.id ? 'mine' : visual.activePlayer === opp.id ? 'theirs' : null;
     root.querySelector('.field.me')!.classList.toggle('turn', active === 'mine');
     root.querySelector('.field.opp')!.classList.toggle('turn', active === 'theirs');
-    const owner = active ? `<div class="turn-owner ${active}">${active === 'mine' ? 'Seu turno' : `Turno de ${esc(opp.name)}`}</div>` : '';
-    $('#fPhases').innerHTML = `<div class="turn-no">Turno ${visual.turn}</div>${owner}` + PHASES.map(([k, l]) =>
-      `<div class="ph ${group === k ? 'on' : ''} ${visual.activePlayer === s.you ? 'mine' : 'theirs'}"><span class="dot"></span>${l}</div>`).join('');
+    setHTML($('#fPhases'), phaseHudHTML(visual));
 
     // Carta que o prompt cita mas que não está à vista na mesa (topo do grimório na vidência/vigilância).
     const pc = s.input.card ?? s.input.targeting?.card;
@@ -952,9 +1019,16 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       : s.input.priority && !s.input.paying && !s.input.targeting ? '' : opening === 'play-draw' || opening === 'mulligan' || (opening === 'mulligan-bottom' && s.input.openingReturnCount !== undefined) ? ''
       : opening === 'mulligan-bottom' ? s.input.message.replace(/(\d+)\s+carta\(s\)/g, (_, n: string) => `${n} ${Number(n) === 1 ? 'carta' : 'cartas'}`) : s.input.message;
     $('#fAction').classList.toggle('suspend-choice', !!s.input.suspendCast);
-    const selectionCount = s.input.selection && !s.input.opening ? `<span class="selection-count" role="status">Seleção: ${s.input.selection.cards.length}/${s.input.selection.max}</span>` : '';
-    setHTML($('#fAction'), `${promptCard}<div class="prompt">${richText(prompt).replace(/\n/g, '<br>')}</div>${selectionCount}<div class="btns">${buttons(s)}</div>`);
-    announce(prompt || (opening === 'play-draw' ? 'Escolha quem joga primeiro.' : opening === 'mulligan' ? `Mão inicial: ${me.hand.length} cartas.` : opening === 'mulligan-bottom' ? `Cartas a devolver: ${s.input.openingReturnRemaining ?? s.input.openingReturnCount ?? 0}.` : ''));
+    const decision = cardDecision(s);
+    $('#fAction').classList.toggle('card-decision', !!decision);
+    $('#fAction').classList.toggle('hand-decision', !!decision?.inHand);
+    root.querySelector('.arena')!.classList.toggle('has-hand-decision', !!decision?.inHand);
+    const instruction = decision ? selectionMessage(prompt) : prompt;
+    const lines = instruction.split('\n');
+    const heading = decision ? `<h2 class="decision-heading">${esc(lines.length > 1 ? lines.shift()! : 'Sua escolha')}</h2>` : '';
+    const selectionCount = decision ? `<div class="decision-progress" role="status"><strong>${esc(decision.progress)}</strong><span>${esc(decision.instruction)}</span></div>` : '';
+    setHTML($('#fAction'), `${promptCard}<div class="decision-copy">${heading}<div class="prompt">${richText(lines.join('\n')).replace(/\n/g, '<br>')}</div></div>${selectionCount}<div class="btns">${buttons(s)}</div>`);
+    announce(instruction ? `${instruction}${decision ? ` ${decision.progress}. ${decision.instruction}` : ''}` : (opening === 'play-draw' ? 'Escolha quem joga primeiro.' : opening === 'mulligan' ? `Mão inicial: ${me.hand.length} cartas.` : opening === 'mulligan-bottom' ? `Cartas a devolver: ${s.input.openingReturnRemaining ?? s.input.openingReturnCount ?? 0}.` : ''));
 
     const qEl = $('#fQuestion');
     if (s.question && !s.gameOver) {
@@ -1010,6 +1084,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     restoreFocus(savedFocus);
     syncModal();
     layoutExileShelf();
+    layoutCardDecision();
     layoutStack();
     drawBlockArrows(visual);
     motion.play({ silent: silently || suppressOpeningPreview(s) || !!s.input.blocking || !!s.input.selection, semantic: !!s.events });
@@ -1062,7 +1137,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   function cardFromElement(el: HTMLElement): FCard | undefined {
     if (el.dataset.event) return timeline.history.find(event => event.seq === Number(el.dataset.event))?.card;
     const stackId = el.dataset.stack ?? el.dataset.stackInspect;
-    if (stackId !== undefined && client?.state) return (el.closest('#fStackGallery') ? client.state.stack : stateWithFrame(client.state, displayFrame).stack).find(item => item.id === Number(stackId))?.source;
+    if (stackId !== undefined && client?.state) return (el.closest('#fStackGallery') ? client.state.stack : stackPresentation(client.state, timeline.current?.event).stack).find(item => item.id === Number(stackId))?.source;
     const id = el.dataset.inspect ?? el.dataset.fid ?? el.dataset.peek;
     return id === undefined ? undefined : findCard(Number(id));
   }
@@ -1093,7 +1168,13 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   root.addEventListener('click', e => {
     const t = e.target as HTMLElement;
     const ui = t.closest<HTMLElement>('[data-ui]')?.dataset.ui;
+    if (!t.closest('#fMenu') && ui !== 'menu') setMenu(false);
     if (ui === 'stack-close' || t.id === 'fStackGallery') { closeStackGallery(); return; }
+    if (ui === 'stack-replay') {
+      const pile = t.closest<HTMLElement>('[data-stack-replay]');
+      if (pile) showPreview(cardFromElement(pile), pile, true);
+      return;
+    }
     if (ui === 'stack-open') {
       const s = client?.state;
       if (!s?.stack.length || s.question || s.gameOver || s.sideboarding || disconnected) return;
@@ -1101,7 +1182,9 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       $('#fStackGallery').querySelector<HTMLElement>('.stack-gallery-card.actionable, .stack-gallery-card')?.focus({ preventScroll: true });
       return;
     }
-    if (ui === 'settings') { $('#fSettings').hidden = !$('#fSettings').hidden; root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', String(!$('#fSettings').hidden)); return; }
+    if (ui === 'settings') { setSettings(true); return; }
+    if (ui === 'settings-close' || t.id === 'fSettings') { setSettings(false); return; }
+    if (ui === 'auto-pass') { if (client?.connected && !disconnected) autoPass.change(!autoPass.value); syncAutoPass(); return; }
     if (ui === 'mute') { audio.setMuted(!audio.settings.muted); syncSettings(); return; }
     if (ui === 'sideboard-ready' || ui === 'next-game') {
       const sb = client?.state?.sideboarding;
@@ -1142,14 +1225,14 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (purePeek && !purePeek.closest('[data-gy]')) { showPreview(cardFromElement(purePeek), purePeek, true); return; }
     const renderedQuestion = t.closest<HTMLElement>('[data-qid]');
     if (renderedQuestion && Number(renderedQuestion.dataset.qid) !== client?.state?.question?.id) return;
-    if (ui === 'menu') { $('#fMenu').hidden = !$('#fMenu').hidden; return; }
-    if (ui === 'log') { $('#fLogDrawer').hidden = !$('#fLogDrawer').hidden; return; }
+    if (ui === 'menu') { setMenu($('#fMenu').hidden); return; }
+    if (ui === 'log') { setLog($('#fLogDrawer').hidden, true); return; }
     if (ui === 'fullscreen') { void toggleFullscreen(); return; }
     if (ui === 'exit') {
       if (client?.state?.gameOver || disconnected || confirm(client?.state?.room ? 'Desistir e sair da sala?' : 'Desistir desta partida?')) { stopPresentation(); hideCardPreview(true); client?.send({ type: 'concede' }); opts.onExit(); }
       return;
     }
-    if (ui === 'rematch') { $('#fMenu').hidden = true; opts.onRematch(); return; }
+    if (ui === 'rematch') { setMenu(false); opts.onRematch(); return; }
     if (ui === 'zone-close' || t.id === 'fZone') { closeZone(); return; }
     const ctr = t.closest<HTMLElement>('[data-ctr]')?.dataset.ctr ?? null;
     if (ctr || openCounter) {
@@ -1243,7 +1326,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       $('#fAmountRemaining').textContent = status.text;
       (root.querySelector('[data-q-amount-submit]') as HTMLButtonElement).disabled = !status.valid;
     }
-    if (t.id === 'fVolume') audio.setVolume(Number(t.value) / 100);
+    if (t.id === 'fVolume') { audio.setVolume(Number(t.value) / 100); syncSettings(); }
   });
   root.addEventListener('change', e => {
     const t = e.target as HTMLSelectElement;
@@ -1274,10 +1357,13 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   });
   root.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      if (!$('#fSettings').hidden) { e.preventDefault(); setSettings(false); return; }
+      if (!$('#fMenu').hidden) { e.preventDefault(); setMenu(false, true); return; }
+      if (!$('#fLogDrawer').hidden) { e.preventDefault(); setLog(false, true); return; }
       if (selectedBlocker) { selectedBlocker = null; e.preventDefault(); renderTable(false); return; }
       if (stackGalleryOpen) { e.preventDefault(); closeStackGallery(); return; }
       if (zoneOf !== null || groupIds) { closeZone(); return; }
-      $('#fMenu').hidden = true; $('#fSettings').hidden = true; $('#fLogDrawer').hidden = true; root.querySelector('[aria-controls="fSettings"]')?.setAttribute('aria-expanded', 'false'); hideCardPreview(true);
+      hideCardPreview(true);
     }
     const target = e.target as HTMLElement;
     if (stackGalleryOpen && target.matches('.stack-gallery-card') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
@@ -1303,6 +1389,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
 
   return {
     attach(c, pics) {
+      autoPass.reset();
       client = c; portraits = pics; lastTurn = 0; disconnected = false; qState = null; clickedGen = -1; zoneOf = null;
       lastDamage = new Map(); groupIds = null; selectedBlocker = null;
       stackGalleryOpen = false; $('#fStackGallery').hidden = true;
@@ -1312,12 +1399,12 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       $('#fOverlay').hidden = true;
       $('#fQuestion').hidden = true;
       $('#fZone').hidden = true;
-      syncModal();
+      syncAutoPass(); syncModal();
     },
     render,
     notice,
     reconnecting(attempt) {
-      disconnected = true;
+      disconnected = true; autoPass.reset(); syncAutoPass();
       if (stackGalleryOpen) closeStackGallery();
       handDrag.cancel(); stopPresentation(); silentNext = true;
       const ov = $('#fOverlay');
@@ -1329,7 +1416,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       syncModal();
     },
     disconnected(reason) {
-      disconnected = true;
+      disconnected = true; autoPass.reset(); syncAutoPass();
       if (stackGalleryOpen) closeStackGallery();
       handDrag.cancel(); stopPresentation(); silentNext = true;
       const room = !!client?.state?.session;

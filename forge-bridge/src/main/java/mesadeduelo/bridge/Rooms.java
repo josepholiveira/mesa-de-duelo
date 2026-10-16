@@ -130,7 +130,7 @@ final class Rooms implements BridgeServer.Listener {
                 default -> {
                     Session s = byChannel.get(ch);
                     Session.Seat seat = s == null ? null : s.seatOf(ch);
-                    if (seat != null) s.onClientMessage(seat, type, msg);
+                    if (seat != null) s.onClientMessage(seat, ch, type, msg);
                 }
             }
         } catch (InvalidDeck e) {

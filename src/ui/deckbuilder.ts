@@ -8,6 +8,7 @@ import { cardCopyLimit, copiesInDeck, validateDeckLocal, type ServerDeckValidati
 import { inspectCard, showCardPreview, hideCardPreview } from './cardInspector';
 import { openDeckPreview } from './deckPreview';
 import { mountAppHeader } from './appHeader';
+import { applyDeckImport, deckImportSnapshot, type DeckImportMode } from './deckImport';
 
 interface BuilderOptions {
   onBack(): void;
@@ -17,7 +18,7 @@ interface BuilderOptions {
   onPlay?(deck: DeckData): void;
   validateDeck?(deck: DeckData, format: DeckFormat): Promise<ServerDeckValidation>;
 }
-export interface DeckBuilderOpen { action: 'create' | 'import' | 'library'; format?: DeckFormat }
+export type DeckBuilderOpen = { action: 'create' | 'import' | 'library'; format?: DeckFormat } | { action: 'edit'; deckId: string; format?: DeckFormat };
 const COLORS: Color[] = ['W', 'U', 'B', 'R', 'G'];
 const COLOR_NAME: Record<Color, string> = { W: 'Branco', U: 'Azul', B: 'Preto', R: 'Vermelho', G: 'Verde' };
 const TYPE_FILTERS = [['Todos os tipos', ''], ['Criatura', 't:creature'], ['Instantânea', 't:instant'], ['Feitiço', 't:sorcery'], ['Artefato', 't:artifact'], ['Encantamento', 't:enchantment'], ['Terreno', 't:land']];
@@ -60,7 +61,9 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
   let importBusy = false;
   let importError = '';
   let importSeq = 0;
-  let importReview: { deck: DeckData; parsed: ParsedList; missing: string[] } | null = null;
+  let importTarget: DeckData | null = null;
+  let importMode: DeckImportMode | null = null;
+  let importReview: { deck: DeckData; incoming: DeckData; parsed: ParsedList; missing: string[] } | null = null;
   let importAcknowledged = false;
   const current = () => [...user, ...DEFAULT_DECKS].find(d => d.id === selected);
   const $ = <T extends HTMLElement = HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
@@ -120,12 +123,12 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
     return groupedRows(entries).map(group => `<section class="dw-card-group"><h3>${group.label}<span>${countEntries(group.rows)}</span></h3><ul>${group.rows.map(row => {
       const label = row.info?.label ?? row.name;
       return `<li><button type="button" class="dw-card-name" data-inspect="${esc(row.name)}" data-focus="inspect:${esc(row.name)}"><span class="dw-card-art">${row.info?.artCrop ? `<img src="${esc(row.info.artCrop)}" alt="" loading="lazy">` : ''}</span><span>${esc(label)}</span><span class="dw-mana">${row.info ? manaHTML(row.info.manaCost) : ''}</span></button>${deck.builtin ? `<b class="dw-count">${row.count}</b>` : `<div class="dw-stepper"><button type="button" data-dec="${esc(row.name)}" data-focus="dec:${esc(row.name)}" aria-label="Remover uma cópia de ${esc(label)}">−</button><span>${row.count}</span><button type="button" data-add="${esc(row.name)}" data-focus="add:${esc(row.name)}" aria-label="Adicionar uma cópia de ${esc(label)}">+</button></div>`}<button type="button" class="dw-transfer" data-move="${esc(row.name)}" data-focus="move:${esc(row.name)}" ${deck.builtin ? 'hidden' : ''} title="${section === 'main' ? 'Mover uma cópia para o sideboard' : 'Mover uma cópia para o deck principal'}" aria-label="${section === 'main' ? 'Mover uma cópia para o sideboard' : 'Mover uma cópia para o deck principal'}: ${esc(label)}">${section === 'main' ? '→' : '←'}</button></li>`;
-    }).join('')}</ul></section>`).join('') || `<div class="dw-empty compact"><h3>${section === 'main' ? 'Seu deck começa aqui.' : 'Sideboard vazio.'}</h3><p>${section === 'main' ? 'Abra a busca e adicione suas primeiras cartas.' : 'Adicione até 15 cartas de reserva para ajustar sua estratégia entre os jogos.'}</p>${!deck.builtin ? '<button type="button" class="dw-button primary" data-b="open-search">Adicionar cartas</button>' : ''}</div>`;
+    }).join('')}</ul></section>`).join('') || `<div class="dw-empty compact"><h3>${section === 'main' ? 'Seu deck começa aqui.' : 'Sideboard vazio.'}</h3><p>${section === 'main' ? 'Adicione suas primeiras cartas ou importe uma lista pronta.' : 'Adicione até 15 cartas de reserva para ajustar sua estratégia entre os jogos.'}</p>${!deck.builtin ? '<div class="dw-actions"><button type="button" class="dw-button primary" data-b="open-search">Adicionar cartas</button><button type="button" class="dw-button" data-b="import-current">Importar lista</button></div>' : ''}</div>`;
   }
   function renderEdit() {
     const deck = current(); if (!deck) { view = 'library'; renderLibrary(); return; }
     const art = deckArt(deck);
-    $('#dwContent').innerHTML = `<section class="dw-editor"><button type="button" class="dw-button subtle" data-b="library">← Voltar aos meus decks</button><div class="dw-edit-head">${art ? `<img class="dw-edit-cover" src="${esc(art)}" alt="">` : ''}<div class="dw-edit-name"><p class="dw-eyebrow">${deck.builtin ? 'Deck pronto' : 'Seu deck'}</p>${deck.builtin ? `<h1>${esc(deck.name)}</h1>` : `<label class="dw-field">Nome do deck<input id="dwName" data-focus="deck-name" maxlength="80" value="${esc(deck.name)}"></label>`}<p>${deckColors(deck).map(pip).join('')} ${deckSize(deck)} cartas · ${countEntries(deck.sideboard ?? [])} no sideboard</p></div><label class="dw-field">Formato<select id="dwDeckFormat" data-focus="deck-format" ${deck.builtin ? 'disabled' : ''}>${formatOptions(deck.format ?? 'free')}</select></label><div class="dw-actions"><button type="button" class="dw-button" data-b="export">Exportar lista</button>${deck.importSource ? '<button type="button" class="dw-button" data-b="source">Lista original</button>' : ''}<button type="button" class="dw-button" data-b="dup">${deck.builtin ? 'Criar uma cópia' : 'Duplicar'}</button>${!deck.builtin ? '<button type="button" class="dw-button danger" data-b="del">Excluir</button>' : ''}</div></div>${deck.builtin ? '<p class="dw-template-note">Este deck pronto pode ser usado como está. Crie uma cópia para editar suas cartas.</p>' : ''}<div class="dw-edit-layout ${searchOpen && !deck.builtin ? 'search-open' : ''}"><section class="dw-deck-panel">${statsHTML(deck)}${validationHTML(deck)}<div class="dw-section-tabs" role="group" aria-label="Seção do deck"><button type="button" class="dw-button" data-section="main" data-focus="section-main" aria-pressed="${section === 'main'}">Principal <b>${deckSize(deck)}</b></button><button type="button" class="dw-button" data-section="sideboard" data-focus="section-sideboard" aria-pressed="${section === 'sideboard'}">Sideboard <b>${countEntries(deck.sideboard ?? [])}</b></button>${!deck.builtin ? `<button type="button" class="dw-button primary" data-b="search" data-focus="toggle-search" aria-expanded="${searchOpen}">${searchOpen ? 'Fechar busca' : 'Adicionar cartas'}</button>` : ''}</div><div class="dw-card-list">${entriesHTML(deck)}</div></section>${searchOpen && !deck.builtin ? `<aside class="dw-search-panel" aria-label="Buscar cartas"><h2>Adicionar ao ${section === 'main' ? 'deck principal' : 'sideboard'}</h2><form id="dwSearchForm"><label class="dw-field">Nome ou texto da carta<input id="dwCardQuery" data-focus="card-search" type="search" value="${esc(searchQuery)}" placeholder="Busque em português ou inglês" autocomplete="off"></label><button class="dw-button primary" type="submit">Buscar</button></form><details class="dw-filters"><summary>Filtros e busca avançada</summary><div class="dw-colors">${COLORS.map(c => `<button type="button" data-color="${c}" aria-label="Filtrar por ${COLOR_NAME[c].toLowerCase()}" aria-pressed="${searchColors.has(c)}">${pip(c)}</button>`).join('')}</div><label class="dw-field">Tipo<select id="dwSearchType">${TYPE_FILTERS.map(([label, value]) => `<option value="${value}" ${value === searchType ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p>Busca avançada: <code>mv&lt;=2</code> para custo, <code>o:"draw a card"</code> para texto. As cores incluem cartas incolores.</p></details><p class="dw-note">${deck.format === 'pauper' ? 'Mostrando cartas legais no Pauper. ' : ''}Toque na imagem para ler; use + para adicionar.</p><div id="dwResults"></div></aside>` : ''}</div></section>`;
+    $('#dwContent').innerHTML = `<section class="dw-editor"><button type="button" class="dw-button subtle" data-b="library">← Voltar aos meus decks</button><div class="dw-edit-head">${art ? `<img class="dw-edit-cover" src="${esc(art)}" alt="">` : ''}<div class="dw-edit-name"><p class="dw-eyebrow">${deck.builtin ? 'Deck pronto' : 'Seu deck'}</p>${deck.builtin ? `<h1>${esc(deck.name)}</h1>` : `<label class="dw-field">Nome do deck<input id="dwName" data-focus="deck-name" maxlength="80" value="${esc(deck.name)}"></label>`}<p>${deckColors(deck).map(pip).join('')} ${deckSize(deck)} cartas · ${countEntries(deck.sideboard ?? [])} no sideboard</p></div><label class="dw-field">Formato<select id="dwDeckFormat" data-focus="deck-format" ${deck.builtin ? 'disabled' : ''}>${formatOptions(deck.format ?? 'free')}</select></label><div class="dw-actions">${!deck.builtin ? '<button type="button" class="dw-button" data-b="import-current">Importar lista</button>' : ''}<button type="button" class="dw-button" data-b="export">Exportar lista</button>${deck.importSource ? '<button type="button" class="dw-button" data-b="source">Lista original</button>' : ''}<button type="button" class="dw-button" data-b="dup">${deck.builtin ? 'Criar uma cópia' : 'Duplicar'}</button>${!deck.builtin ? '<button type="button" class="dw-button danger" data-b="del">Excluir</button>' : ''}</div></div>${deck.builtin ? '<p class="dw-template-note">Este deck pronto pode ser usado como está. Crie uma cópia para editar suas cartas.</p>' : ''}<div class="dw-edit-layout ${searchOpen && !deck.builtin ? 'search-open' : ''}"><section class="dw-deck-panel">${statsHTML(deck)}${validationHTML(deck)}<div class="dw-section-tabs" role="group" aria-label="Seção do deck"><button type="button" class="dw-button" data-section="main" data-focus="section-main" aria-pressed="${section === 'main'}">Principal <b>${deckSize(deck)}</b></button><button type="button" class="dw-button" data-section="sideboard" data-focus="section-sideboard" aria-pressed="${section === 'sideboard'}">Sideboard <b>${countEntries(deck.sideboard ?? [])}</b></button>${!deck.builtin ? `<button type="button" class="dw-button primary" data-b="search" data-focus="toggle-search" aria-expanded="${searchOpen}">${searchOpen ? 'Fechar busca' : 'Adicionar cartas'}</button>` : ''}</div><div class="dw-card-list">${entriesHTML(deck)}</div></section>${searchOpen && !deck.builtin ? `<aside class="dw-search-panel" aria-label="Buscar cartas"><h2>Adicionar ao ${section === 'main' ? 'deck principal' : 'sideboard'}</h2><form id="dwSearchForm"><label class="dw-field">Nome ou texto da carta<input id="dwCardQuery" data-focus="card-search" type="search" value="${esc(searchQuery)}" placeholder="Busque em português ou inglês" autocomplete="off"></label><button class="dw-button primary" type="submit">Buscar</button></form><details class="dw-filters"><summary>Filtros e busca avançada</summary><div class="dw-colors">${COLORS.map(c => `<button type="button" data-color="${c}" aria-label="Filtrar por ${COLOR_NAME[c].toLowerCase()}" aria-pressed="${searchColors.has(c)}">${pip(c)}</button>`).join('')}</div><label class="dw-field">Tipo<select id="dwSearchType">${TYPE_FILTERS.map(([label, value]) => `<option value="${value}" ${value === searchType ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p>Busca avançada: <code>mv&lt;=2</code> para custo, <code>o:"draw a card"</code> para texto. As cores incluem cartas incolores.</p></details><p class="dw-note">${deck.format === 'pauper' ? 'Mostrando cartas legais no Pauper. ' : ''}Toque na imagem para ler; use + para adicionar.</p><div id="dwResults"></div></aside>` : ''}</div></section>`;
     if (searchOpen && !deck.builtin) renderResults();
   }
   function renderResults() {
@@ -139,9 +142,38 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
       return `<article><button type="button" class="dw-result-art" data-inspect="${esc(sc.name)}" aria-label="Ler ${esc(info.label)}">${info.imageSmall ? `<img src="${esc(info.imageSmall)}" alt="" loading="lazy">` : esc(info.label)}</button><p title="${esc(info.label)}">${esc(info.label)}</p><div class="dw-stepper"><button type="button" data-dec="${esc(sc.name)}" data-focus="result-dec:${esc(sc.name)}" ${!count ? 'disabled' : ''} aria-label="Remover uma cópia de ${esc(info.label)}">−</button><span>${count}</span><button type="button" data-add="${esc(sc.name)}" data-focus="result-add:${esc(sc.name)}" ${full ? 'disabled' : ''} aria-label="Adicionar uma cópia de ${esc(info.label)}">+</button></div></article>`;
     }).join('')}</div>${hasMore ? `<button type="button" class="dw-button dw-more" data-b="more" ${searching ? 'disabled' : ''}>${searching ? 'Carregando…' : 'Mais resultados'}</button>` : ''}`;
   }
+  function importCanSave() {
+    return !!importReview && (!importTarget || !!importMode) && !importError
+      && (!(importReview.parsed.skipped.length || importReview.parsed.ignored.length) || importAcknowledged);
+  }
   function renderImport() {
-    const review = importReview;
-    $('#dwContent').innerHTML = `<section class="dw-import"><button type="button" class="dw-button subtle" data-b="library">← Voltar aos meus decks</button><p class="dw-eyebrow">${review ? '2. Revise sua lista' : '1. Cole sua lista'}</p><h1 tabindex="-1" id="dwImportHeading">Importar deck</h1><p>Deck principal e sideboard serão preservados.</p>${review ? `<div class="dw-import-review"><h2>${esc(review.deck.name)}</h2><p>${deckSize(review.deck)} cartas no principal · ${countEntries(review.deck.sideboard ?? [])} no sideboard · ${formatLabel(review.deck.format ?? 'free')}</p>${review.missing.length ? `<div class="dw-error"><strong>Cartas não reconhecidas</strong><p>Estas cartas serão preservadas no rascunho, sem permitir iniciar uma partida até serem corrigidas:</p><ul>${review.missing.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}${review.parsed.skipped.length || review.parsed.ignored.length ? `<div class="dw-error"><p>Algumas linhas não serão adicionadas às cartas. A lista original ficará salva no rascunho.</p><ul>${[...review.parsed.skipped, ...review.parsed.ignored].map(line => `<li>${esc(line)}</li>`).join('')}</ul><label><input type="checkbox" id="dwImportAck" ${importAcknowledged ? 'checked' : ''}> Revisei as linhas acima e quero guardar o rascunho.</label></div>` : ''}${validationHTML(review.deck)}<details><summary>Lista reconhecida</summary><pre>${esc(exportDeckList(review.deck))}</pre></details><div class="dw-actions"><button type="button" class="dw-button" data-b="import-edit">Voltar à lista</button><button type="button" class="dw-button primary" data-b="import-save" ${(review.parsed.skipped.length || review.parsed.ignored.length) && !importAcknowledged ? 'disabled' : ''}>Salvar ${review.missing.length ? 'rascunho' : 'deck'}</button></div></div>` : `<form id="dwImportForm"><div class="dw-import-fields"><label class="dw-field">Nome do deck<input id="dwImportName" data-focus="import-name" ${importBusy ? 'disabled' : ''} maxlength="80" value="${esc(importDraft.name)}" placeholder="Meu novo deck" required></label><label class="dw-field">Formato<select id="dwImportFormat" data-focus="import-format" ${importBusy ? 'disabled' : ''}>${formatOptions(format)}</select></label></div><label class="dw-field">Lista de cartas<textarea id="dwImportText" data-focus="import-text" ${importBusy ? 'disabled' : ''} rows="13" spellcheck="false" required placeholder="Deck&#10;4 Lightning Bolt&#10;20 Mountain&#10;&#10;Sideboard&#10;2 Duress">${esc(importDraft.text)}</textarea></label><p class="dw-note">Arena, MTGO, Moxfield ou Archidekt. Uma carta por linha; nomes em português ou inglês. Maybeboard, fichas e comandantes aparecem na revisão, sem entrar no deck.</p>${importError ? `<p class="dw-error" role="alert">${esc(importError)}</p>` : ''}<div class="dw-actions"><button class="dw-button primary" ${importBusy ? 'disabled' : ''}>${importBusy ? 'Conferindo cartas…' : 'Revisar importação'}</button><button type="button" class="dw-button" data-b="export-import">Baixar lista original</button></div></form>`}</section>`;
+    const review = importReview, target = importTarget;
+    const needsChoice = !!target && !!deckEntries(target).length;
+    const countLabel = (deck: DeckData) => `${deckSize(deck)} no principal · ${countEntries(deck.sideboard ?? [])} no sideboard`;
+    $('#dwContent').innerHTML = `<section class="dw-import"><button type="button" class="dw-button subtle" data-b="import-cancel">← ${target ? 'Voltar ao deck' : 'Voltar aos meus decks'}</button><p class="dw-eyebrow">${review ? '2. Revise sua lista' : '1. Cole sua lista'}</p><h1 tabindex="-1" id="dwImportHeading">${target ? 'Importar lista neste deck' : 'Importar deck'}</h1><p>${target ? `<strong>${esc(target.name)}</strong> · ${formatLabel(target.format ?? 'free')}. O nome e o formato serão mantidos.` : 'Deck principal e sideboard serão preservados.'}</p>${review ? `<div class="dw-import-review"><h2>${esc(review.deck.name)}</h2>${needsChoice ? `<fieldset class="dw-import-mode"><legend>Como aplicar a lista?</legend><label><input type="radio" name="importMode" value="merge" data-focus="import-merge" ${importMode === 'merge' ? 'checked' : ''}><span><strong>Adicionar às cartas atuais</strong><small>Soma as cópias da lista ao principal e ao sideboard.</small></span></label><label><input type="radio" name="importMode" value="replace" data-focus="import-replace" ${importMode === 'replace' ? 'checked' : ''}><span><strong>Substituir todas as cartas</strong><small>Troca o principal e o sideboard pela lista importada.</small></span></label></fieldset>` : ''}<div class="dw-import-counts" aria-live="polite">${target ? `<p><span>Deck atual</span><strong>${countLabel(target)}</strong></p>` : ''}<p><span>${target && !importMode ? 'Lista importada' : target ? 'Após salvar' : 'Lista reconhecida'}</span><strong>${countLabel(review.deck)}</strong></p></div>${review.missing.length ? `<div class="dw-error"><strong>Cartas não reconhecidas</strong><p>Estas cartas serão preservadas no rascunho, sem permitir iniciar uma partida até serem corrigidas:</p><ul>${review.missing.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}${review.parsed.skipped.length || review.parsed.ignored.length ? `<div class="dw-error"><p>Algumas linhas não serão adicionadas às cartas. A lista original ficará salva no rascunho.</p><ul>${[...review.parsed.skipped, ...review.parsed.ignored].map(line => `<li>${esc(line)}</li>`).join('')}</ul><label><input type="checkbox" id="dwImportAck" data-focus="import-ack" ${importAcknowledged ? 'checked' : ''}> Revisei as linhas acima e quero guardar o rascunho.</label></div>` : ''}${!target || importMode ? validationHTML(review.deck) : '<p class="dw-note">Escolha uma opção para conferir o resultado antes de salvar.</p>'}<details><summary>${target && importMode ? 'Lista após salvar' : 'Lista reconhecida'}</summary><pre>${esc(exportDeckList(review.deck))}</pre></details>${importError ? `<p class="dw-error" role="alert">${esc(importError)}</p>` : ''}<div class="dw-actions"><button type="button" class="dw-button" data-b="import-edit">Voltar à lista</button><button type="button" class="dw-button primary" data-b="import-save" ${importCanSave() ? '' : 'disabled'}>${target ? 'Salvar neste deck' : `Salvar ${review.missing.length ? 'rascunho' : 'deck'}`}</button></div></div>` : `<form id="dwImportForm">${!target ? `<div class="dw-import-fields"><label class="dw-field">Nome do deck<input id="dwImportName" data-focus="import-name" ${importBusy ? 'disabled' : ''} maxlength="80" value="${esc(importDraft.name)}" placeholder="Meu novo deck" required></label><label class="dw-field">Formato<select id="dwImportFormat" data-focus="import-format" ${importBusy ? 'disabled' : ''}>${formatOptions(format)}</select></label></div>` : ''}<label class="dw-field">Lista de cartas<textarea id="dwImportText" data-focus="import-text" ${importBusy ? 'disabled' : ''} rows="13" spellcheck="false" required placeholder="Deck&#10;4 Lightning Bolt&#10;20 Mountain&#10;&#10;Sideboard&#10;2 Duress">${esc(importDraft.text)}</textarea></label><p class="dw-note">Arena, MTGO, Moxfield ou Archidekt. Uma carta por linha; nomes em português ou inglês. Maybeboard, fichas e comandantes aparecem na revisão, sem entrar no deck.</p>${importError ? `<p class="dw-error" role="alert">${esc(importError)}</p>` : ''}<div class="dw-actions"><button class="dw-button primary" ${importBusy ? 'disabled' : ''}>${importBusy ? 'Conferindo cartas…' : 'Revisar importação'}</button><button type="button" class="dw-button" data-b="export-import">Baixar lista original</button></div></form>`}</section>`;
+  }
+  function beginImport(target?: DeckData) {
+    if (target?.builtin) return;
+    importSeq++; importBusy = false; validationSeq++; validating = false; validation = null; validationError = '';
+    importTarget = target ? structuredClone(target) : null;
+    importMode = target && !deckEntries(target).length ? 'replace' : null;
+    importDraft = { name: target?.name ?? '', text: '' }; importReview = null; importError = ''; importAcknowledged = false;
+    view = 'import'; hideCardPreview(); render(); $('#dwImportText')?.focus();
+  }
+  function saveImport() {
+    if (!importReview || !importCanSave()) return;
+    const deck = importReview.deck;
+    if (importTarget) {
+      const latest = loadUserDecks(), index = latest.findIndex(d => d.id === importTarget!.id);
+      user = [...latest];
+      if (index < 0 || deckImportSnapshot(latest[index]) !== deckImportSnapshot(importTarget)) {
+        importError = 'Este deck mudou durante a revisão. Volte ao deck e importe a lista novamente; suas cartas não foram alteradas.';
+        renderImport(); return;
+      }
+      user[index] = deck;
+    } else user = [deck, ...loadUserDecks()];
+    persist(importTarget ? 'Lista salva no mesmo deck. Principal e sideboard atualizados.' : 'Deck importado. Principal e sideboard preservados.');
+    importReview = null; importTarget = null; importDraft = { name: '', text: '' }; edit(deck);
   }
   function render() { renderStatus(); if (view === 'library') renderLibrary(); else if (view === 'import') renderImport(); else renderEdit(); }
   async function loadData() {
@@ -195,9 +227,9 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
     searching = false; renderResults();
   }
   async function reviewImport() {
-    const source = { ...importDraft }, importFormat = format;
+    const source = { ...importDraft }, importFormat = importTarget?.format ?? format;
     const parsed = parseDeckList(source.text);
-    if (!parsed.main.length) { importError = 'Nenhuma carta reconhecida no deck principal. Confira a lista.'; renderImport(); return; }
+    if (!parsed.main.length && (!importTarget || !parsed.sideboard.length)) { importError = 'Nenhuma carta reconhecida no deck principal. Confira a lista.'; renderImport(); return; }
     const seq = ++importSeq; importBusy = true; importError = ''; renderImport();
     try {
       const resolved = await resolveCardNames([...parsed.main, ...parsed.sideboard].map(e => e.name));
@@ -211,7 +243,8 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
         }
         return [...merged.values()];
       };
-      importReview = { deck: { id: crypto.randomUUID(), name: source.name.trim() || 'Deck importado', format: importFormat, cards: normalize(parsed.main), sideboard: normalize(parsed.sideboard), importSource: source.text, unresolved: resolved.missing, updatedAt: new Date().toISOString() }, parsed, missing: resolved.missing };
+      const incoming: DeckData = { id: crypto.randomUUID(), name: source.name.trim() || 'Deck importado', format: importFormat, cards: normalize(parsed.main), sideboard: normalize(parsed.sideboard), importSource: source.text, unresolved: resolved.missing, updatedAt: new Date().toISOString() };
+      importReview = { deck: importTarget ? applyDeckImport(importTarget, incoming, importMode ?? 'replace') : incoming, incoming, parsed, missing: resolved.missing };
       importAcknowledged = false; validation = null;
     } catch (error) { if (seq === importSeq) importError = `Não foi possível conferir as cartas. Sua lista foi preservada. ${(error as Error).message}`; }
     if (seq === importSeq) { importBusy = false; renderImport(); $('#dwImportHeading')?.focus(); }
@@ -242,12 +275,14 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
       case 'home': goHome(); break;
       case 'library': goLibrary(); break;
       case 'new': create(); break;
-      case 'import': importSeq++; importBusy = false; validationSeq++; validating = false; view = 'import'; importReview = null; validation = null; render(); break;
+      case 'import': beginImport(); break;
+      case 'import-current': { const deck = current(); if (deck) beginImport(deck); break; }
+      case 'import-cancel': { user = loadUserDecks(); const deck = importTarget && user.find(d => d.id === importTarget!.id); importTarget = null; if (deck) edit(deck); else goLibrary(); break; }
       case 'dup': { const deck = current(); if (deck) duplicate(deck); break; }
       case 'del': { const deck = current(); if (deck && !deck.builtin) { removed = { deck, index: user.indexOf(deck) }; user = user.filter(d => d.id !== deck.id); selected = null; view = 'library'; persist('Deck excluído.'); render(); } break; }
       case 'undo': if (removed) { user.splice(removed.index, 0, removed.deck); removed = null; persist('Deck restaurado.'); render(); } break;
       case 'export': { const deck = current(); if (deck) download(exportDeckList(deck), `${deck.name.replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 70) || 'deck'}.txt`); break; }
-      case 'source': { const source = current()?.importSource; if (source) download(source, 'lista-original.txt'); break; }
+      case 'source': { const deck = current(); if (deck?.importSource) download([...deck.importHistory ?? [], deck.importSource].join('\n\n// Importação seguinte\n\n'), 'listas-originais.txt'); break; }
       case 'export-import': download(importDraft.text, 'lista-original.txt'); break;
       case 'recovery': download(exportDeckRecovery(), 'recuperacao-decks.json', 'application/json'); break;
       case 'retry-save': persist(); break;
@@ -257,8 +292,8 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
       case 'more': void runSearch(true); break;
       case 'retry-search': void runSearch(); break;
       case 'validate': void validate(); break;
-      case 'import-edit': validationSeq++; validating = false; importReview = null; validation = null; renderImport(); break;
-      case 'import-save': if (importReview && (!(importReview.parsed.skipped.length || importReview.parsed.ignored.length) || importAcknowledged)) { const deck = importReview.deck; user.unshift(deck); importReview = null; importDraft = { name: '', text: '' }; persist('Deck importado. Principal e sideboard preservados.'); edit(deck); } break;
+      case 'import-edit': validationSeq++; validating = false; importReview = null; validation = null; importError = ''; renderImport(); $('#dwImportText')?.focus(); break;
+      case 'import-save': saveImport(); break;
     }
   });
   root.addEventListener('submit', e => {
@@ -279,7 +314,13 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
     if (input.id === 'dwFormat' || input.id === 'dwImportFormat') { format = input.value as DeckFormat; opts.onFormatChange?.(format); if (view === 'library') renderLibrary(); }
     if (input.id === 'dwDeckFormat') { const deck = current(); if (deck && !deck.builtin) { deck.format = input.value as DeckFormat; format = deck.format; changed(deck); resetSearch(); preserveRender(renderEdit); void loadData(); } }
     if (input.id === 'dwSearchType') { searchType = input.value; void runSearch(); }
-    if (input.id === 'dwImportAck') { importAcknowledged = input.checked; const button = root.querySelector<HTMLButtonElement>('[data-b="import-save"]'); if (button) button.disabled = !input.checked; }
+    if (input.name === 'importMode' && importTarget && importReview && (input.value === 'merge' || input.value === 'replace')) {
+      importMode = input.value; validationSeq++; validating = false; validation = null; validationError = ''; importError = '';
+      try { importReview.deck = applyDeckImport(importTarget, importReview.incoming, importMode); }
+      catch (error) { importError = (error as Error).message; }
+      preserveRender(renderImport);
+    }
+    if (input.id === 'dwImportAck') { importAcknowledged = input.checked; const button = root.querySelector<HTMLButtonElement>('[data-b="import-save"]'); if (button) button.disabled = !importCanSave(); }
   });
   const preview = (e: Event) => {
     const card = (e.target as HTMLElement).closest<HTMLElement>('[data-inspect]');
@@ -296,8 +337,11 @@ export function mountDeckBuilder(root: HTMLElement, opts: BuilderOptions) {
       importSeq++; importBusy = false; validationSeq++; validating = false; validation = null; validationError = ''; hideCardPreview();
       if (options.format) format = options.format;
       user = loadUserDecks();
+      importTarget = null;
       if (options.action === 'create') create();
-      else { view = options.action === 'import' ? 'import' : 'library'; selected = null; importReview = null; render(); void loadData(); }
+      else if (options.action === 'import') beginImport();
+      else if (options.action === 'edit') { const deck = user.find(d => d.id === options.deckId); if (deck) edit(deck); else { notice = 'Este deck não está mais na sua coleção.'; goLibrary(); } }
+      else { view = 'library'; selected = null; importReview = null; render(); void loadData(); }
     },
   };
 }

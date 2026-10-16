@@ -2,6 +2,7 @@ import type { DeckData, DeckEntry, DeckFormat } from '../decks';
 
 /** Cliente da ponte do Forge (forge-bridge). Formato das mensagens descrito em forge-bridge/README.md. */
 
+export interface FPreferences { autoPassNoActions: boolean }
 export interface MatchConfig { format: DeckFormat; matchLength: 'bo1' | 'bo3' }
 export interface ValidationIssue { code: string; message: string; card?: string; section?: string }
 export interface DeckValidation { valid: boolean; issues: ValidationIssue[]; mainCount?: number; sideboardCount?: number; rulesVersion: string; engineVersion: string }
@@ -107,6 +108,7 @@ export interface FRoom {
 export interface FState {
   type: 'state';
   config?: MatchConfig;
+  preferences?: FPreferences;
   match?: FMatch;
   sideboarding?: FSideboarding;
   matchId?: string;
@@ -163,6 +165,7 @@ export type ClientMessage =
   | { type: 'lookup-room'; requestId: string; code: string }
   | { type: 'sideboard'; id: number; deck: unknown } | { type: 'next-game'; id: number }
   | { type: 'rematch' } | { type: 'leave' }
+  | { type: 'preferences'; autoPassNoActions: boolean }
   | { type: 'card'; id: number; gen?: number }
   | { type: 'block'; attacker: number; blocker: number; gen: number }
   | { type: 'stack'; id: number; gen?: number }

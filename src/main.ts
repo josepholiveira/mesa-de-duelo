@@ -86,6 +86,7 @@ const lobby = mountLobby(document.querySelector('#scrLobby')!, {
   onLookup: async (code, url) => (await requireForge(url)).lookupRoom(code),
   onCancelRoom: () => { leaveForge(); lobby.setStatus(''); },
   onDecks: (action = 'library', format) => { builder.open({action, format}); show('decks'); },
+  onEditDeck: deckId => { builder.open({action: 'edit', deckId}); show('decks'); },
 });
 
 const builder = mountDeckBuilder(document.querySelector('#scrDecks')!, {

@@ -25,6 +25,7 @@ export interface LobbyOptions {
   onLookup(code: string, url: string): Promise<RoomInfo>;
   onCancelRoom(): void;
   onDecks(action?: DeckAction, format?: DeckFormat): void;
+  onEditDeck(deckId: string): void;
 }
 const load = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const save = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* Browser-local preferences are optional. */ } };
@@ -94,16 +95,16 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
   function tiles(decks: DeckData[]) {
     return decks.map(d => {
       const art = deckArt(d), on = youId === d.id;
-      return `<div class="tile-wrap"><button type="button" class="deck-tile${on ? ' on' : ''}" data-deck="${esc(d.id)}" aria-pressed="${on}" aria-label="Escolher ${esc(d.name)}"><span class="tile-art"${art ? ` style="background-image:url('${esc(art)}')"` : ''}></span>${on ? '<span class="tile-check" aria-hidden="true">✓</span>' : ''}<span class="tile-info"><span class="tile-name">${esc(d.name)}</span><span class="tile-meta">${deckColors(d).map(pip).join('')}<span>${deckSize(d)} cartas</span></span><span class="tile-validity">${esc(validationLabel(d))}</span></span></button><button type="button" class="tile-peek" data-peek="${esc(d.id)}" aria-label="Ver as cartas de ${esc(d.name)}">${EYE}</button></div>`;
+      return `<div class="tile-wrap${!d.builtin ? ' personal-tile' : ''}"><button type="button" class="deck-tile${on ? ' on' : ''}" data-deck="${esc(d.id)}" aria-pressed="${on}" aria-label="Escolher ${esc(d.name)}"><span class="tile-art"${art ? ` style="background-image:url('${esc(art)}')"` : ''}></span>${on ? '<span class="tile-check" aria-hidden="true">✓</span>' : ''}<span class="tile-info"><span class="tile-name">${esc(d.name)}</span><span class="tile-meta">${deckColors(d).map(pip).join('')}<span>${deckSize(d)} cartas</span></span><span class="tile-validity">${esc(validationLabel(d))}</span></span></button><button type="button" class="tile-peek" data-peek="${esc(d.id)}" aria-label="Ver as cartas de ${esc(d.name)}">${EYE}</button>${!d.builtin ? `<button type="button" class="tile-edit" data-edit-deck="${esc(d.id)}" aria-label="Editar ${esc(d.name)}">Editar</button>` : ''}</div>`;
     }).join('');
   }
   function refresh() {
     const focused = document.activeElement as HTMLElement | null;
-    const focusId = root.contains(focused) ? focused?.dataset.deck ?? focused?.dataset.peek : undefined;
-    const wasPeek = !!focused?.dataset.peek;
+    const focusId = root.contains(focused) ? focused?.dataset.deck ?? focused?.dataset.peek ?? focused?.dataset.editDeck : undefined;
+    const focusAttribute = focused?.dataset.editDeck ? 'edit-deck' : focused?.dataset.peek ? 'peek' : 'deck';
     const decks = allDecks(), personal = decks.filter(d => !d.builtin), ready = decks.filter(d => d.builtin);
     if (!decks.some(d => d.id === youId)) youId = '';
-    const mine = personal.filter(d => matches(d) && allowed(d)), templates = ready.filter(d => matches(d) && allowed(d));
+    const mine = personal.filter(matches), templates = ready.filter(d => matches(d) && allowed(d));
     $('#personalCount').textContent = personal.length ? String(personal.length) : '';
     $('#personalTiles').innerHTML = mine.length ? tiles(mine) : !personal.length ? `<div class="personal-empty"><div class="empty-cards" aria-hidden="true"><i></i><i></i><i></i></div><div><h3>Você ainda não tem nenhum deck.</h3><p>Comece com suas cartas favoritas ou importe uma lista que você já gosta de jogar.</p><button class="arena-btn primary" data-lobby="create">Criar meu primeiro deck</button></div></div>` : `<div class="shelf-empty"><p>${query ? 'Nenhum dos seus decks corresponde à busca.' : `Você ainda não tem um deck válido para ${formatName(format)}.`}</p><button class="ghost-btn" data-lobby="${query ? 'clear' : 'incompatible'}">${query ? 'Limpar busca' : 'Mostrar decks incompatíveis'}</button></div>`;
     $('#readyTiles').innerHTML = templates.length ? tiles(expanded ? templates : templates.slice(0, 4)) : '<p class="shelf-empty">Nenhum deck pronto corresponde à seleção.</p>';
@@ -126,7 +127,7 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
     if (oppId !== 'random' && !aiPool.some(d => d.id === oppId)) oppId = 'random';
     $<HTMLSelectElement>('#oppSel').innerHTML = '<option value="random">Aleatório entre os compatíveis</option>' + aiPool.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
     $<HTMLSelectElement>('#oppSel').value = oppId;
-    for (const control of root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('#oppSel, #netName, #netCode, #netUrl, [data-join] button, [data-lobby=library], [data-lobby=create], [data-lobby=import]')) control.disabled = busy || !!waitingRoom;
+    for (const control of root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('#oppSel, #netName, #netCode, #netUrl, [data-join] button, [data-lobby=library], [data-lobby=create], [data-lobby=import], [data-edit-deck]')) control.disabled = busy || !!waitingRoom;
     const deck = selected(), result = deck && format ? validations.get(key(deck)) : undefined;
     const invalid = !!deck && !!format && (result ? !result.valid : validateDeckLocal(deck, format).status === 'invalid');
     const art = deck && deckArt(deck);
@@ -136,7 +137,7 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
     start.textContent = busy ? 'Preparando…' : mode === 'ai' ? 'Jogar' : room ? 'Entrar na sala' : 'Criar sala';
     $('#roomInfo').hidden = !room;
     $('#roomInfo').innerHTML = room ? `<p>Sala <strong>${esc(room.code)}</strong> · ${esc(room.players[0]?.name ?? 'Anfitrião')} · ${formatName(room.config.format)} · ${room.config.matchLength === 'bo3' ? 'Melhor de três' : 'Partida única'}</p><p>Escolha um deck compatível e confirme abaixo.</p><button class="ghost-btn" data-lobby="cancel-lookup">Voltar a criar uma sala</button>` : '';
-    if (focusId) root.querySelector<HTMLElement>(`[data-${wasPeek ? 'peek' : 'deck'}="${CSS.escape(focusId)}"]`)?.focus({preventScroll: true});
+    if (focusId) root.querySelector<HTMLElement>(`[data-${focusAttribute}="${CSS.escape(focusId)}"]`)?.focus({preventScroll: true});
   }
   const setBusy = (value: boolean) => { busy = value; refresh(); };
   function choose(deck: DeckData) {
@@ -185,6 +186,8 @@ export function mountLobby(root: HTMLElement, opts: LobbyOptions): Lobby {
       } else { matchLength = choice.dataset.value === 'bo3' ? 'bo3' : 'bo1'; save('mesa:matchLength', matchLength); }
       refresh(); return;
     }
+    const editId = target.closest<HTMLButtonElement>('[data-edit-deck]')?.dataset.editDeck;
+    if (editId && !busy && !waitingRoom && loadUserDecks().some(d => d.id === editId)) { preflight++; opts.onEditDeck(editId); return; }
     const picked = target.closest<HTMLElement>('[data-deck]')?.dataset.deck;
     if (picked && !busy) { const deck = allDecks().find(d => d.id === picked); if (deck) choose(deck); return; }
     const peek = target.closest<HTMLElement>('[data-peek]')?.dataset.peek;

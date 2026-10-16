@@ -1,0 +1,59 @@
+/* A complete turn track stays on the table; it does not compete with the stack. */
+.forge { --phase-width: 560px; grid-template-rows: max(16vh, 124px) minmax(0, 1fr) 2px minmax(0, 1fr) 23vh; }
+.forge .phase-rail, .forge.stack-tight .phase-rail {
+  display: flex; flex-direction: column; gap: 10px; top: 12px; right: 16px;
+  width: var(--phase-width); padding: 12px 14px 10px; transform: none;
+  border: 1px solid #b9c7df24; border-radius: 10px;
+  background: linear-gradient(135deg, #111c30eb, #080f1de8); box-shadow: 0 4px 16px #0003;
+  font: 400 13px/1.2 var(--body);
+}
+.phase-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-width: 0; }
+.phase-turn { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.phase-turn b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.phase-owner { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 600 15px/1.2 var(--body); }
+.phase-owner.mine { color: var(--gold); }
+.phase-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; list-style: none; margin: 0; padding: 0; }
+.phase-step { display: flex; flex-direction: column; align-items: center; gap: 7px; position: relative; color: #b7c0d0; font-size: 13px; white-space: nowrap; }
+.phase-step::before { content: ''; position: absolute; left: -50%; right: 50%; top: 4px; height: 1px; background: #64718a65; }
+.phase-step:first-child::before { display: none; }
+.phase-dot { position: relative; width: 9px; height: 9px; border: 1px solid #718099; border-radius: 50%; background: #152039; }
+.phase-step.passed .phase-dot { background: #7e8da3; border-color: #7e8da3; }
+.phase-step.current { color: var(--gold); font-weight: 600; }
+.phase-step.current .phase-dot { background: var(--gold); border-color: var(--gold); box-shadow: 0 0 0 3px #f2b54c24; }
+.phase-detail { color: var(--ink); font-size: 12px; text-align: right; min-height: 15px; }
+.forge .opp-hand { left: auto; right: calc(var(--phase-width) + 144px); }
+.forge .piles.opp, .forge.stack-tight .piles.opp { top: 52px; right: calc(var(--phase-width) + 136px); }
+@media (max-width: 1190px) {
+  .forge { --phase-width: 510px; }
+  .forge .phase-rail { padding-inline: 10px; right: 10px; }
+  .phase-step { font-size: 11px; }
+  .forge .avatar-slot.opp { left: calc(100% - var(--phase-width) - 62px); }
+  .forge .opp-hand { right: calc(var(--phase-width) + 124px); }
+  .forge .piles.opp, .forge.stack-tight .piles.opp { right: calc(var(--phase-width) + 112px); }
+}
+@media (max-width: 1000px), (max-height: 500px) {
+  .forge { --phase-width: min(440px, 52vw); grid-template-rows: max(16vh, 104px) minmax(0, 1fr) 2px minmax(0, 1fr) 21vh; }
+  .forge .phase-rail, .forge.stack-tight .phase-rail { display: flex; top: 6px; right: 8px; gap: 6px; padding: 8px; }
+  .phase-turn { font-size: 12px; }
+  .phase-owner { font-size: 13px; }
+  .phase-step { gap: 5px; font-size: 10px; white-space: normal; text-align: center; }
+  .phase-detail { font-size: 11px; min-height: 13px; }
+  .forge .avatar-slot.opp { left: calc(100% - var(--phase-width) - 43px); }
+  .forge .opp-hand { right: calc(var(--phase-width) + 102px); }
+  .forge .piles.opp, .forge.stack-tight .piles.opp { top: 47px; right: calc(var(--phase-width) + 88px); }
+}
+@media (max-width: 760px) {
+  .forge { --phase-width: 53vw; grid-template-rows: 132px minmax(0, 1fr) 2px minmax(0, 1fr) 21vh; }
+  .phase-track { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 9px; }
+  .phase-step { font-size: 11px; }
+  .phase-step:nth-child(5)::before { display: none; }
+  .forge .avatar-slot.opp { top: 48px; }
+  .forge .opp-hand { top: 48px; right: calc(var(--phase-width) + 104px); }
+  .forge .piles.opp, .forge.stack-tight .piles.opp { top: 88px; right: calc(var(--phase-width) + 88px); }
+}
+
+/* Under vertical pressure, the heading belongs to the stack column, never over cards or choices. */
+.forge.stack-tight .stack-panel .stack-heading {
+  right: 0; top: -38px; flex-direction: row; gap: 8px; z-index: 7;
+  padding: 0 4px; border-radius: 6px; background: var(--bg-deep);
+}

@@ -2,6 +2,7 @@ package mesadeduelo.bridge;
 
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
@@ -23,9 +24,11 @@ final class WebGuiGame extends ProtocolGuiGame {
     private static final Set<PhaseType> STOPS_THEIRS = EnumSet.of(PhaseType.COMBAT_DECLARE_BLOCKERS);
 
     private volatile PlayerView me;
+    private final BooleanSupplier autoPassNoActions;
 
-    WebGuiGame(IRemote remote) {
+    WebGuiGame(IRemote remote, BooleanSupplier autoPassNoActions) {
         super(remote);
+        this.autoPassNoActions = autoPassNoActions;
     }
 
     @Override
@@ -38,7 +41,7 @@ final class WebGuiGame extends ProtocolGuiGame {
         if (controller == null || getGameView() == null) return;
         // Per-player defaults: skip only when Forge proves there is no legal non-mana action.
         // Presentation timing must never create extra priority confirmations.
-        controller.applyYieldUpdate(new YieldUpdate.SetYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, "true"));
+        controller.applyYieldUpdate(new YieldUpdate.SetYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, Boolean.toString(autoPassNoActions.getAsBoolean())));
         controller.applyYieldUpdate(new YieldUpdate.SetYieldPref(FPref.YIELD_AUTO_PASS_RESPECTS_INTERRUPTS, "false"));
         for (PlayerView p : getGameView().getPlayers()) {
             for (PhaseType ph : PhaseType.values()) {

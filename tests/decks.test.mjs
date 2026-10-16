@@ -11,6 +11,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
 } });
 const decks = await import('../src/decks.ts');
+const { applyDeckImport, deckImportSnapshot } = await import('../src/ui/deckImport.ts');
 const { cardCopyLimit, copiesInDeck, validateDeckLocal } = await import('../src/ui/deckRules.ts');
 const { deckStats, statsHTML } = await import('../src/ui/deckStats.ts');
 const { legalityFresh } = await import('../src/scryfall.ts');
@@ -176,4 +177,66 @@ test('Pauper ready decks contain 60 main, 15 sideboard and stay separate from le
   assert.equal(pauper.length, 2);
   for (const deck of pauper) { assert.equal(decks.deckSize(deck), 60); assert.equal(decks.countEntries(deck.sideboard), 15); assert.equal(deck.builtin, true); }
   assert.equal(decks.DEFAULT_DECKS.filter(d => d.format === 'free').length, 14);
+});
+
+
+test('import into an empty deck keeps ID, name, format and unknown metadata', () => {
+  const target = { ...example, name: 'Meu rascunho', cards: [], sideboard: [], sourceTemplateId: 'old-template', custom: { favorite: true } };
+  const incoming = { ...example, id: 'new-id', name: 'Other name', format: 'free', importSource: '4 Lightning Bolt' };
+  const result = applyDeckImport(target, incoming, 'replace');
+  assert.equal(result.id, target.id); assert.equal(result.name, target.name); assert.equal(result.format, target.format);
+  assert.equal(result.sourceTemplateId, 'old-template'); assert.deepEqual(result.custom, { favorite: true });
+  assert.deepEqual(result.cards, incoming.cards); assert.deepEqual(result.sideboard, incoming.sideboard);
+  assert.deepEqual(target.cards, []); assert.notEqual(result.cards, incoming.cards);
+});
+
+test('merge sums canonical copies independently in main and sideboard without mutating inputs', () => {
+  const target = { ...example, cards: [{ name: 'Lightning Bolt', count: 2, oracleId: 'bolt' }], unresolved: ['Unknown Card'] };
+  const incoming = { ...example, cards: [{ name: 'Raio', count: 2, oracleId: 'bolt' }, { name: 'Unknown Card', count: 1 }], sideboard: [{ name: 'duress', count: 1 }, { name: 'Lightning Bolt', count: 1 }], unresolved: ['Unknown Card'] };
+  const before = JSON.stringify([target, incoming]);
+  const result = applyDeckImport(target, incoming, 'merge');
+  assert.equal(result.cards[0].count, 4); assert.equal(result.cards.length, 2);
+  assert.deepEqual(result.sideboard.map(e => e.count), [3, 1]);
+  assert.deepEqual(result.unresolved, ['Unknown Card']);
+  assert.equal(JSON.stringify([target, incoming]), before);
+});
+
+test('replace updates both sections and retains original import sources for recovery', () => {
+  const target = { ...example, unresolved: ['Old Typo'], importSource: 'original list', importHistory: ['earlier list'] };
+  const incoming = { ...example, cards: [{ name: 'Mountain', count: 20 }], sideboard: [], unresolved: [], importSource: 'replacement list' };
+  const result = applyDeckImport(target, incoming, 'replace');
+  assert.deepEqual(result.cards, incoming.cards); assert.deepEqual(result.sideboard, []); assert.deepEqual(result.unresolved, []);
+  assert.deepEqual(result.importHistory, ['earlier list', 'original list']); assert.equal(result.importSource, 'replacement list');
+  assert.equal(target.sideboard.length, 1);
+});
+
+test('empty/malformed imports and overflowing merges leave the target intact', () => {
+  const target = structuredClone(example), before = JSON.stringify(target);
+  const malformed = decks.parseDeckList('Deck\n0 Lightning Bolt\n-2 Mountain');
+  assert.throws(() => applyDeckImport(target, { ...example, cards: malformed.main, sideboard: [] }, 'replace'));
+  assert.throws(() => applyDeckImport(target, { ...example, cards: [{ name: 'Lightning Bolt', count: Number.MAX_SAFE_INTEGER }] }, 'merge'));
+  assert.throws(() => applyDeckImport(target, { ...example, cards: [{ name: 'Mountain', count: -1 }] }, 'replace'));
+  assert.throws(() => applyDeckImport(target, example, null));
+  assert.equal(JSON.stringify(target), before);
+});
+
+test('same-deck imports survive quota failures as recoverable in-memory edits', () => {
+  const initial = JSON.stringify({ version: 2, decks: [example], recovery: [] });
+  const store = storage({ [decks.DECK_STORAGE_KEY]: initial }, true);
+  const result = applyDeckImport(example, { ...example, cards: [{ name: 'Mountain', count: 20 }], sideboard: [] }, 'replace');
+  assert.equal(decks.writeDeckLibrary(store, [result]).ok, false);
+  assert.equal(store.getItem(decks.DECK_STORAGE_KEY), initial);
+  assert.equal(result.id, example.id); assert.equal(result.cards[0].count, 20);
+});
+
+
+test('fresh Create snapshots equal normalized storage; actual external changes are detected', () => {
+  const fresh = { id: 'new', name: 'Novo deck', cards: [], sideboard: [], format: 'free', updatedAt: 'now' };
+  const store = storage();
+  assert.equal(decks.writeDeckLibrary(store, [fresh]).ok, true);
+  const loaded = decks.readDeckLibrary(store).decks[0];
+  assert.equal(loaded.builtin, false); assert.equal(fresh.builtin, undefined);
+  assert.equal(deckImportSnapshot(fresh), deckImportSnapshot(loaded));
+  assert.notEqual(deckImportSnapshot(fresh), deckImportSnapshot({ ...loaded, name: 'Changed elsewhere' }));
+  assert.notEqual(deckImportSnapshot(fresh), deckImportSnapshot({ ...loaded, cards: [{ name: 'Forest', count: 1 }] }));
 });

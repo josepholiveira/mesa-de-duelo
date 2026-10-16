@@ -12,6 +12,7 @@ export interface DeckData {
   updatedAt?: string;
   sourceTemplateId?: string;
   importSource?: string;
+  importHistory?: string[];
   unresolved?: string[];
 }
 export const DEFAULT_DECKS = starterDecks as DeckData[];

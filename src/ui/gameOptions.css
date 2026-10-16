@@ -1,0 +1,48 @@
+.forge .game-menu-trigger { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding-inline: 14px; }
+.game-menu-trigger svg, .game-options-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.forge .game-menu { top: max(56px, calc(env(safe-area-inset-top, 0px) + 48px)); width: min(270px, calc(100vw - 24px)); padding: 8px; gap: 3px; border-radius: 16px; box-shadow: 0 4px 8px #0003, 0 16px 40px #0005; animation: none; }
+.forge .game-menu .btn { min-height: 44px; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 500 15px var(--body); transition: background-color 120ms ease, transform 120ms ease; }
+.forge .game-menu .btn:hover { background: var(--surface); transform: none; }
+.forge .game-menu .btn:active, .forge .game-menu-trigger:active, .game-options button:active { transform: scale(.96); }
+.game-menu-divider { height: 1px; margin: 4px 12px; background: var(--line); }
+.game-menu-meta { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; color: var(--muted); font: 500 12px var(--body); }
+.game-menu-meta:not(:has(> :not([hidden]))) { display: none; }
+.game-menu-meta .room-tag, .game-menu-meta .series-score { padding: 0; background: none; border: 0; }
+
+.forge .game-options-overlay { z-index: 45; padding: 20px; background: #060b12b8; animation: none; }
+.game-options { width: min(440px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box; padding: 24px; border-radius: 22px; background: color-mix(in srgb, var(--surface) 50%, var(--bg-deep)); color: var(--ink); box-shadow: 0 0 0 1px #ffffff14, 0 8px 20px #0004, 0 32px 80px #0007; font: 500 15px/1.5 var(--body); }
+.game-options-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.game-options h2 { margin: 0; font: 600 24px/1.2 var(--body); letter-spacing: -.025em; }
+.game-options .game-options-close { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; background: var(--surface); }
+.game-option-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.sound-switch { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 4px 0 4px 4px; background: none; border: 0; border-radius: 24px; color: var(--muted); font: 500 13px var(--body); cursor: pointer; }
+.sound-switch > #fSoundState, .sound-switch > #fAutoPassState { min-width: 72px; text-align: left; }
+.sound-switch-track { display: block; width: 46px; height: 28px; padding: 3px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 99px; background: var(--bg-deep); transition: background-color 120ms ease; }
+.sound-switch-track > span { display: block; width: 20px; height: 20px; border-radius: 50%; background: #d4d8df; box-shadow: 0 1px 3px #0005; transition: transform 120ms cubic-bezier(.2, 0, 0, 1); }
+.sound-switch[aria-checked="true"] { color: var(--ink); }
+.sound-switch[aria-checked="true"] .sound-switch-track { border-color: transparent; background: var(--gold); }
+.sound-switch[aria-checked="true"] .sound-switch-track > span { transform: translateX(18px); background: #fffaf0; }
+.game-option-volume { margin-top: 24px; padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+.game-option-volume output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.game-options input[type="range"] { display: block; width: 100%; height: 28px; margin: 10px 0 0; padding: 0; accent-color: var(--gold); cursor: pointer; }
+.sound-switch:disabled { opacity: .5; cursor: default; }
+.game-option-auto-pass { margin-top: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.game-option-auto-pass .game-option-row > :first-child { min-width: 0; }
+.game-option-auto-pass .sound-switch { flex-shrink: 0; }
+.game-option-auto-pass p { margin: 10px 0 0; color: var(--muted); font: 400 13px/1.55 var(--body); }
+.game-option-auto-pass #fAutoPassStatus { color: var(--gold-light); }
+.game-option-pace { display: grid; gap: 10px; margin-top: 24px; }
+.game-option-pace select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-deep); color: var(--ink); font: inherit; }
+.game-option-pace p { margin: 0; color: var(--muted); font: 400 13px/1.55 var(--body); }
+.game-options footer { display: flex; justify-content: flex-end; margin-top: 28px; }
+.game-options footer .arena-btn { min-height: 44px; padding: 10px 18px; border-radius: 10px; font: 500 14px var(--body); }
+.game-options :focus-visible, .forge .game-menu :focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+.game-options :focus-visible, .game-options :focus-visible *, .forge .game-menu :focus-visible { transition: none; }
+@media (max-width: 480px) {
+  .forge .game-options-overlay { padding: 12px; }
+  .game-options { padding: 20px; max-height: calc(100dvh - 24px); border-radius: 18px; }
+  .game-options-heading { margin-bottom: 20px; }
+  .game-option-row { gap: 10px; }
+  .game-options footer .arena-btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .game-options *, .forge .game-menu * { transition: none; } .game-options button:active, .forge .game-menu .btn:active { transform: none; } }

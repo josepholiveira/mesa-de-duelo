@@ -111,6 +111,16 @@
 .dw-import textarea { resize: vertical; min-height: 250px; font: 15px/1.6 ui-monospace, monospace; }
 .dw-import-review pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.5 ui-monospace, monospace; }
 .dw-import-review .dw-actions { margin-top: 24px; justify-content: flex-end; }
+.dw-import-mode { margin: 18px 0; padding: 0; border: 0; display: grid; gap: 10px; }
+.dw-import-mode legend { font-weight: 600; margin-bottom: 10px; }
+.dw-import-mode label { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--dw-line); border-radius: 8px; cursor: pointer; }
+.dw-import-mode label:has(:checked) { border-color: var(--dw-accent); background: #f2b54c0a; }
+.dw-import-mode input { margin-top: 5px; accent-color: var(--dw-accent); width: 18px; height: 18px; flex: 0 0 18px; }
+.dw-import-mode small { display: block; font-size: 13px; color: var(--dw-muted); margin-top: 3px; }
+.dw-import-counts { padding: 10px 0; border-block: 1px solid var(--dw-line); font-size: 14px; }
+.dw-import-counts p { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
+.dw-import-counts span { color: var(--dw-muted); }
+.dw-import-counts strong { font-weight: 500; font-variant-numeric: tabular-nums; }
 .dw-import-review input[type='checkbox'] { width: 18px; height: 18px; vertical-align: middle; }
 .ds-stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px 28px; }
 .ds-counts { display: flex; flex-direction: column; gap: 4px; color: var(--dw-muted); font-size: 13px; }

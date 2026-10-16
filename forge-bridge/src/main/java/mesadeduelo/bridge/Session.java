@@ -48,6 +48,7 @@ import forge.gui.FThreads;
 import forge.gui.GuiBase;
 import forge.gui.interfaces.IGuiGame;
 import forge.interfaces.IGameController;
+import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.player.GamePlayerUtil;
 import forge.player.LobbyPlayerHuman;
 import forge.player.PlayerControllerHuman;
@@ -142,7 +143,7 @@ final class Session {
             String name = seat.name;
             for (int n = 2; !names.add(name); n++) name = seat.name + " (" + n + ")";
             seat.name = name;
-            WebGuiGame g = new WebGuiGame(seat.new Remote());
+            WebGuiGame g = new WebGuiGame(seat.new Remote(), () -> seat.autoPassNoActions);
             seat.gui = g;
             RegisteredPlayer rp = new RegisteredPlayer(seat.deck).setPlayer(new LobbyPlayerHuman(name));
             seat.registered = rp;
@@ -267,7 +268,7 @@ final class Session {
 
     // ---------- Mensagens do navegador ----------
 
-    void onClientMessage(Seat seat, String type, JsonObject msg) {
+    void onClientMessage(Seat seat, Channel source, String type, JsonObject msg) {
         int actionGen = -1;
         if (Set.of("card", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
             if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { markDirty(); return; }
@@ -276,6 +277,7 @@ final class Session {
         }
         final int genAtClick = actionGen;
         switch (type) {
+            case "preferences" -> seat.updatePreferences(source, msg);
             case "sideboard" -> submitSideboard(seat, msg, false);
             case "next-game" -> submitSideboard(seat, msg, true);
             case "hello" -> markDirty();
@@ -802,6 +804,9 @@ final class Session {
             return null;
         }
         state.add("config", config.json());
+        JsonObject preferences = new JsonObject();
+        preferences.addProperty("autoPassNoActions", seat.autoPassNoActions);
+        state.add("preferences", preferences);
         state.add("match", matchJson());
         state.addProperty("matchId", matchId);
         MatchConfig.versions(state);
@@ -896,6 +901,8 @@ final class Session {
         private volatile Deck approvedDeck;
         private volatile boolean sideboardReady;
         private volatile long sentEventCursor;
+        // A seat preference survives reconnects, the next game, and a rematch.
+        private volatile boolean autoPassNoActions = true;
 
         private volatile WebGuiGame gui;
         private volatile PlayerView me;
@@ -957,6 +964,23 @@ final class Session {
 
         private boolean livePriority() {
             return controller() instanceof PlayerControllerHuman human && human.getInputQueue().getInput() instanceof InputPassPriority;
+        }
+
+        private void updatePreferences(Channel source, JsonObject message) {
+            JsonElement value = message.get("autoPassNoActions");
+            if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
+                throw new IllegalArgumentException("Informe um valor booleano para a passagem automática de prioridade.");
+            boolean enabled = value.getAsBoolean();
+            // Settings are independent of a prompt generation, but a replaced or departed socket
+            // cannot change this seat. Resolve the controller at execution time across Bo3 games.
+            FThreads.invokeInEdtLater(() -> {
+                if (channel != source) return;
+                autoPassNoActions = enabled;
+                IGameController current = controller();
+                if (current != null) current.applyYieldUpdate(new YieldUpdate.SetYieldPref(
+                    FPref.YIELD_AUTO_PASS_NO_ACTIONS, Boolean.toString(enabled)));
+                markDirty();
+            });
         }
 
         private void onEdt(int generation, java.util.function.Consumer<IGameController> action) {
