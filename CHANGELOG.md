@@ -6,6 +6,38 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.7.0] - 2026-10-16
+
+### Novo
+
+- **Pauper** na criação da partida, com decks prontos para o formato e validação de legalidade, cartas banidas, limite de cópias, mínimo de 60 cartas no deck e máximo de 15 no sideboard.
+- Séries **melhor de três**, com placar e troca de cartas entre o deck e o sideboard antes da próxima partida. As trocas não são reveladas ao oponente.
+- Cartas jogáveis podem ser arrastadas da mão ou do exílio para o campo. O clique continua disponível.
+- A pilha ganhou uma galeria central: clique na pilha à direita para ver os efeitos ampliados, rolar horizontalmente e conferir a ordem de resolução e os alvos.
+- **Passar automaticamente** nas opções: o jogo passa a prioridade quando não há ações disponíveis, preservando as oportunidades de resposta. A preferência fica salva; o ritmo das animações pode ser ajustado separadamente.
+- **14 efeitos sonoros**, com impactos medievais, pequenas variações e sons diferentes para compras, terrenos, mágicas, habilidades, combate e início de cada turno. Dano ao jogador tem animação própria e uma explosão diferente da usada para dano às criaturas.
+- **Editar** nos seus decks da tela inicial e **Importar lista** dentro do editor. É possível preencher um deck vazio, somar cartas à lista atual ou substituí-la, mantendo o nome e o formato. A revisão mostra as quantidades do deck e do sideboard antes de salvar.
+
+### Mudou
+
+- **Meus decks** aparecem antes dos decks prontos, com um convite para criar o primeiro deck quando a coleção está vazia. Rascunhos continuam acessíveis para edição.
+- **Jogar** e **Meus decks** compartilham o mesmo cabeçalho. A configuração da partida fica em um painel à direita, com modo, formato e duração visíveis; nome e código de sala aparecem apenas nos fluxos de multiplayer que precisam deles.
+- A mesa mantém o azul e o dourado, com tipografia, espaçamento e hierarquia visual mais consistentes. As prévias dão prioridade à imagem grande da carta, e criaturas com voar recebem uma indicação visual de flutuação.
+- A escolha de quem começa e o mulligan agora acontecem no centro da tela. A mão inicial aparece em leque, cada carta aumenta ao passar o mouse e o botão de manter informa a quantidade de cartas.
+- As jogadas do oponente aparecem em sequência na mesa; mágicas e habilidades também aparecem na pilha à direita. Mágicas resolvidas automaticamente continuam visíveis por um breve momento, identificadas como **Jogada recente**, sem exigir confirmação extra nem atrasar suas respostas.
+- O turno e todas as fases ficam visíveis no topo, incluindo a etapa específica do combate ou da limpeza. Instruções para selecionar cartas da mão aparecem acima delas, com a quantidade já escolhida e o que falta selecionar.
+- Cartas que um efeito permite jogar do exílio ficam separadas ao lado da mão durante todo o prazo, mesmo sem mana ou fora do seu turno. Cartas suspensas mostram os marcadores de tempo; a decisão de conjurar aparece quando o último marcador é removido e a habilidade resolve.
+- No topo da partida ficam apenas **Menu** e tela cheia. **Registro** e **Opções** ficam dentro do menu; as opções abrem no centro, com estado visível dos efeitos sonoros, volume e ritmo das jogadas. Animações respeitam a preferência por movimento reduzido.
+
+### Corrigido
+
+- **Labareda Cauterizante** volta a ser reconhecida como jogável quando há mana e alvos válidos, inclusive quando a escolha de um alvo depende do outro.
+- **Raio da Fenda** oferece as opções de conjurar normalmente ou suspender quando está na mão. **Explosão de Fogo** distingue o pagamento de mana do sacrifício de duas Montanhas.
+- Declarar bloqueadores mantém a ligação entre a criatura selecionada e o atacante escolhido, inclusive com criaturas idênticas. Cartas selecionadas para sacrifício ou descarte recebem contorno, marca de seleção e contagem persistentes.
+- Uma escolha de conjuração pendente deixa de travar outras partidas ou dar a impressão de que o oponente parou. Sair de uma série encerra as decisões pendentes, e ações antigas são rejeitadas após mudanças de estado ou reconexão.
+- Códigos de sala com números são reconhecidos corretamente. Séries em melhor de três preservam o placar e as preferências ao reconectar ou iniciar a próxima partida.
+- Importar listas preserva o sideboard, avisa sobre linhas inválidas e cartas não encontradas e evita sobrescrever alterações feitas em outra aba. Falhas ao salvar mantêm a edição disponível para uma nova tentativa.
+
 ## [0.6.0] - 2026-10-16
 
 ### Novo
