@@ -296,7 +296,7 @@ final class Session {
     void onClientMessage(Seat seat, Channel source, String type, JsonObject msg) {
         if (seat.eliminated() && !Set.of("preferences", "hello").contains(type)) { markDirty(); return; }
         int actionGen = -1;
-        if (Set.of("card", "attack", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
+        if (Set.of("card", "attack", "attack-all", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
             if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { markDirty(); return; }
             actionGen = exactInt(msg.get("gen"));
             if (actionGen != seat.inputGen.get() || seat.question != null || !"playing".equals(matchPhase)) { markDirty(); return; }
@@ -335,6 +335,16 @@ final class Session {
                     if (!(c instanceof PlayerControllerHuman human)
                         || !InputContext.assignAttack(human.getInputQueue().getInput(), attacker, defender, kind))
                         seat.send(toast("error", "Esse ataque não é válido. Escolha um defensor permitido."));
+                    markDirty();
+                });
+            }
+            case "attack-all" -> {
+                int defender = exactInt(msg.get("defender"));
+                String kind = MatchConfig.string(msg, "defenderKind");
+                seat.onEdt(genAtClick, c -> {
+                    if (!(c instanceof PlayerControllerHuman human)
+                        || !InputContext.assignAllAttackers(human.getInputQueue().getInput(), defender, kind))
+                        seat.send(toast("error", "Não foi possível atacar com todas as criaturas. Escolha um defensor permitido antes de declarar atacantes."));
                     markDirty();
                 });
             }

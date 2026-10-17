@@ -111,6 +111,25 @@ final class InputContext {
         return attack.selectCard(attacker, null, null);
     }
 
+    /** Bulk selection is explicit: never redirect an ineligible creature to a different defender. */
+    static boolean assignAllAttackers(Object input, int defenderId, String kind) {
+        if (!(input instanceof InputAttack attack) || !("player".equals(kind) || "card".equals(kind))) return false;
+        Combat combat = (Combat) value(ATTACK_COMBAT, input);
+        if (!combat.getAttackers().isEmpty()) return false;
+        Player player = (Player) value(ATTACK_PLAYER, input);
+        GameEntity defender = null;
+        for (GameEntity candidate : combat.getDefenders())
+            if (candidate.getId() == defenderId && (candidate instanceof Player) == "player".equals(kind)) defender = candidate;
+        if (defender == null) return false;
+        java.util.List<Card> legal = new java.util.ArrayList<>();
+        for (Card attacker : player.getCreaturesInPlay()) if (CombatUtil.canAttack(attacker, defender)) legal.add(attacker);
+        if (legal.isEmpty()) return false;
+        if (defender instanceof Player target) attack.selectPlayer(target, null);
+        else if (!attack.selectCard((Card) defender, null, null)) return false;
+        for (Card attacker : legal) attack.selectCard(attacker, null, null);
+        return !combat.getAttackers().isEmpty();
+    }
+
     static JsonObject blocking(Object input) {
         if (!(input instanceof InputBlock)) return null;
         Combat combat = (Combat) value(COMBAT, input);

@@ -25,6 +25,20 @@ export function attackPairAction(state: FState, selected: AttackSelection | null
   return { type: 'attack' as const, attacker: selected.attacker, defender: defender.id, defenderKind: defender.kind, gen };
 }
 
+/** Bulk declaration uses the union of legal exact targets; each creature still obeys its own assignment. */
+export function legalAttackAllTargets(state: FState, gen: number): Defender[] {
+  if (gen !== state.input.gen || state.combat.length || !state.input.cancel?.enabled) return [];
+  const targets = new Map<string, Defender>();
+  for (const attacker of state.input.attacking?.attackers ?? []) {
+    for (const defender of legalAttackTargets(state, { attacker, gen })) targets.set(`${defender.kind}:${defender.id}`, defender);
+  }
+  return [...targets.values()];
+}
+export function attackAllAction(state: FState, defender: Defender, gen: number) {
+  if (!legalAttackAllTargets(state, gen).some(target => target.id === defender.id && target.kind === defender.kind)) return null;
+  return { type: 'attack-all' as const, defender: defender.id, defenderKind: defender.kind, gen };
+}
+
 export function canPlayCommander(state: FState, id: number, gen: number) {
   return gen === state.input.gen && !state.gameOver && !state.question && !state.spectating && !state.input.paying && !state.input.targeting &&
     !!state.input.priority && state.input.ok.enabled &&

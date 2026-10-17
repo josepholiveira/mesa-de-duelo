@@ -87,6 +87,42 @@ try {
   assert.equal(own(active).commanders[0].casts,1); assert.equal(own(active).commanders[0].tax,2);
   assert.equal(own(active).commandZone.length,0);
 
+  // Advance the human table to the commander's first attack, then choose a nondefault defender.
+  const advanced=new Set();
+  await until(()=>{
+    if(active.state.input.attacking?.attackers.includes(command.id)) return true;
+    for(const p of roomPeers) {
+      const input=p.state?.input, key=`${p.room.seat}:${input?.gen}`;
+      if(input?.selection && !advanced.has(key)) {
+        const remaining=input.selectable.filter(id=>!input.selection.cards.includes(id));
+        if(input.selection.cards.length<input.selection.min && remaining.length) {
+          advanced.add(key);p.send({type:'card',id:remaining[0],gen:input.gen});continue;
+        }
+        if(input.ok.enabled) {advanced.add(key);p.send({type:'ok',gen:input.gen});continue;}
+      }
+      if(!input?.ok.enabled || advanced.has(key) || (!input.priority && !input.attacking)) continue;
+      advanced.add(key);
+      const land=own(p).hand.find(card=>card.land && p.state.castable.includes(card.id));
+      if(input.priority && p.state.activePlayer===p.state.you && land) p.send({type:'card',id:land.id,gen:input.gen});
+      else p.send({type:'ok',gen:input.gen});
+    }
+    return false;
+  },'commander first attack phase');
+  const target=active.state.input.attacking.defenders.filter(d=>d.kind==='player').at(-1);
+  const attackGen=active.state.input.gen;
+  active.send({type:'attack-all',defender:target.id,defenderKind:target.kind,gen:attackGen-1});
+  await wait(150); assert.equal(active.state.combat.length,0,'stale bulk attack must do nothing');
+  active.send({type:'attack-all',defender:target.id,defenderKind:target.kind,gen:active.state.input.gen});
+  await until(()=>active.state.combat.some(row=>row.attacker===command.id),'explicit bulk attack assigned');
+  const attackRow=active.state.combat.find(row=>row.attacker===command.id);
+  assert.equal(attackRow.defender,target.id); assert.equal(attackRow.defenderKind,target.kind);
+  const errors=active.messages.filter(m=>m.type==='error').length;
+  active.send({type:'attack-all',defender:target.id,defenderKind:target.kind,gen:active.state.input.gen});
+  await until(()=>active.messages.filter(m=>m.type==='error').length>errors,'existing assignments rejected');
+  assert.equal(active.state.combat.find(row=>row.attacker===command.id).defender,target.id);
+  active.send({type:'cancel',gen:active.state.input.gen});
+  await until(()=>active.state.combat.length===0,'recall all preserved');
+
   // A separate three-player AI match must progress while this human table waits.
   const solo=await peer(); solo.send({type:'start',config:config(3),you:deck,opponents:[deck,deck]});
   await until(()=>priority(solo),'independent three-player solo');
@@ -135,7 +171,7 @@ try {
     await until(()=>table[0].state.gameOver && table[0].state.match.over,`${count}-human result`);
     for (const p of table) p.send({type:'leave'});
   }
-  console.log('PASS: 2/3/4-player Commander AI; 2/3/4 humans; AI turns; 40 life; command-zone cast/tax; exact seats/private hands; independent game progress; single-seat concede/leave; eliminated reconnect/spectating; last-survivor victory');
+  console.log('PASS: 2/3/4-player Commander AI; 2/3/4 humans; AI turns; 40 life; command-zone cast/tax; explicit bulk defender/stale guard/recall; exact seats/private hands; independent game progress; single-seat concede/leave; eliminated reconnect/spectating; last-survivor victory');
 } finally {
   for(const p of peers) if(p.ws.readyState===WebSocket.OPEN) p.send({type:'leave'});
   await wait(200); for(const p of peers)p.ws.close();

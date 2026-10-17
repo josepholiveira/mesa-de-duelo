@@ -138,6 +138,71 @@ public class CommanderEngineTest {
         });
     }
 
+    @Test public void nativeAttackAllDefaultsToFirstDefenderButHonorsExplicitPlayerOrCardSelection() {
+        Game game = game(4); Player player = game.getPlayers().get(0), chosen = game.getPlayers().get(3);
+        Card first = ExilePermissionsTest.add(game, "Raging Goblin", player, ZoneType.Battlefield);
+        Card second = ExilePermissionsTest.add(game, "Raging Goblin", player, ZoneType.Battlefield);
+        Card walker = ExilePermissionsTest.add(game, "Jace Beleren", chosen, ZoneType.Battlefield);
+        Combat combat = new Combat(player); game.getPhaseHandler().setCombat(combat);
+        FThreads.invokeInEdtAndWait(() -> {
+            var human = new PlayerControllerHuman(game, player, new LobbyPlayerHuman("Test"));
+            human.setGui((IGuiGame) Proxy.newProxyInstance(IGuiGame.class.getClassLoader(), new Class<?>[]{IGuiGame.class},
+                (proxy, method, args) -> method.getReturnType() == boolean.class ? false : null));
+            InputAttack input = new InputAttack(human, player, combat);
+            input.showMessageInitial(); input.selectButtonCancel();
+            assertTrue(combat.isAttacking(first, combat.getDefenders().getFirst()));
+            assertTrue(combat.isAttacking(second, combat.getDefenders().getFirst()));
+            assertFalse(combat.isAttacking(first, chosen));
+            input.selectButtonCancel(); // Existing Recall all must still remove every assignment.
+            assertTrue(combat.getAttackers().isEmpty());
+            input.selectPlayer(chosen, null); input.selectButtonCancel();
+            assertTrue(combat.isAttacking(first, chosen)); assertTrue(combat.isAttacking(second, chosen));
+            input.selectButtonCancel();
+            assertTrue(input.selectCard(walker, null, null)); input.selectButtonCancel();
+            assertTrue(combat.isAttacking(first, walker)); assertTrue(combat.isAttacking(second, walker));
+        });
+    }
+
+    @Test public void explicitBulkAttackNeverFallsBackAndPreservesExistingAssignments() {
+        for (int count : List.of(2, 4)) {
+            Game game = game(count); Player player = game.getPlayers().get(0), chosen = game.getPlayers().get(count - 1);
+            // Create a real planeswalker sharing the chosen player's numeric ID; kind must disambiguate it.
+            Card walker = forge.game.card.CardFactory.getCard(DeckValidation.resolve("Jace Beleren"), chosen, chosen.getId(), game);
+            chosen.getZone(ZoneType.Battlefield).add(walker); walker.setZone(chosen.getZone(ZoneType.Battlefield));
+            // Reserve the fixture's explicit card ID before creating the remaining cards.
+            for (int i = 0; i <= chosen.getId(); i++) game.nextCardId();
+            Card goblin = ExilePermissionsTest.add(game, "Raging Goblin", player, ZoneType.Battlefield);
+            Card serpent = ExilePermissionsTest.add(game, "Sea Serpent", player, ZoneType.Battlefield); serpent.setSickness(false);
+            ExilePermissionsTest.add(game, "Island", player, ZoneType.Battlefield);
+            if (count == 4) ExilePermissionsTest.add(game, "Island", game.getPlayers().get(1), ZoneType.Battlefield);
+            game.getAction().checkStaticAbilities();
+            Combat combat = new Combat(player); game.getPhaseHandler().setCombat(combat);
+            FThreads.invokeInEdtAndWait(() -> {
+                var human = new PlayerControllerHuman(game, player, new LobbyPlayerHuman("Test"));
+                human.setGui((IGuiGame) Proxy.newProxyInstance(IGuiGame.class.getClassLoader(), new Class<?>[]{IGuiGame.class},
+                    (proxy, method, args) -> method.getReturnType() == boolean.class ? false : null));
+                InputAttack input = new InputAttack(human, player, combat); input.showMessageInitial();
+                assertFalse(InputContext.assignAllAttackers(input, player.getId(), "player"));
+                assertFalse(InputContext.assignAllAttackers(input, -1, "card"));
+                assertFalse(InputContext.assignAllAttackers(input, chosen.getId(), "unknown"));
+                assertTrue(combat.getAttackers().isEmpty());
+                assertTrue(InputContext.assignAllAttackers(input, chosen.getId(), "player"));
+                assertTrue(combat.isAttacking(goblin, chosen)); assertFalse(combat.isAttacking(serpent));
+                assertEquals(1, combat.getAttackers().size());
+                assertFalse(InputContext.assignAllAttackers(input, chosen.getId(), "card"));
+                assertTrue(combat.isAttacking(goblin, chosen));
+                input.selectButtonCancel(); assertTrue(combat.getAttackers().isEmpty());
+                assertTrue(InputContext.assignAllAttackers(input, walker.getId(), "card"));
+                assertTrue(combat.isAttacking(goblin, walker)); assertFalse(combat.isAttacking(serpent));
+                input.selectButtonCancel();
+                if (count == 4) {
+                    input.selectPlayer(chosen, null); input.selectButtonCancel();
+                    assertTrue("native alpha strike silently redirects the restricted creature", combat.isAttacking(serpent, game.getPlayers().get(1)));
+                }
+            });
+        }
+    }
+
     @Test public void fourSeatSnapshotsDoNotExposeOpponentHandsOrEliminatedHands() {
         Game game = game(4);
         for (Player player : game.getPlayers()) ExilePermissionsTest.add(game, "Plains", player, ZoneType.Hand);

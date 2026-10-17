@@ -177,6 +177,7 @@ export type ClientMessage =
   | { type: 'card'; id: number; gen?: number }
   | { type: 'block'; attacker: number; blocker: number; gen: number }
   | { type: 'attack'; attacker: number; defender: number; defenderKind: 'player' | 'card'; gen: number }
+  | { type: 'attack-all'; defender: number; defenderKind: 'player' | 'card'; gen: number }
   | { type: 'stack'; id: number; gen?: number }
   | { type: 'player'; id: number; gen?: number }
   | { type: 'mana'; color: string; gen?: number }

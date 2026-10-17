@@ -7,7 +7,7 @@ async function source(path) {
   const output = ts.transpileModule(content, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}`);
 }
-const { tablePlayers, validAttackSelection, legalAttackTargets, attackPairAction, canPlayCommander } = await source('../src/ui/commanderTable.ts');
+const { tablePlayers, validAttackSelection, legalAttackTargets, attackPairAction, legalAttackAllTargets, attackAllAction, canPlayCommander } = await source('../src/ui/commanderTable.ts');
 const { hasLiveDecision, stateWithFrame } = await source('../src/ui/presentationTimeline.ts');
 const { blockPairAction } = await source('../src/ui/playContext.ts');
 function state(count = 4, ownSeat = 2) {
@@ -67,4 +67,21 @@ test('attacker metadata bypasses stale presentation even before other buttons be
   const frame = { players: [], stack: [], combat: [], turn: 1, phase: 'DRAW', activePlayer: 10 };
   assert.equal(hasLiveDecision(s), true);
   assert.equal(stateWithFrame(s, frame), s);
+});
+
+
+test('bulk attack unions exact legal defenders without choosing a default or redirecting creatures', () => {
+  const s = state(); s.input.cancel = { enabled: true };
+  s.players[2].battlefield.push({ id: 202 }); s.players[1].battlefield.push({ id: 10 });
+  s.input.attacking.attackers.push(202);
+  s.input.attacking.legalAssignments.push({attacker:202,defenders:[{id:23,kind:'player'},{id:49,kind:'player'}]});
+  assert.deepEqual(legalAttackAllTargets(s,91),[{id:49,kind:'player'},{id:10,kind:'card'},{id:23,kind:'player'}]);
+  assert.deepEqual(attackAllAction(s,{id:49,kind:'player'},91),{type:'attack-all',defender:49,defenderKind:'player',gen:91});
+  assert.deepEqual(attackAllAction(s,{id:10,kind:'card'},91),{type:'attack-all',defender:10,defenderKind:'card',gen:91});
+  assert.equal(attackAllAction(s,{id:10,kind:'player'},91),null);
+  assert.equal(attackAllAction(s,{id:49,kind:'player'},90),null);
+  s.combat=[{attacker:102,defender:49,defenderKind:'player',blockers:[]}];
+  assert.deepEqual(legalAttackAllTargets(s,91),[]);
+  s.combat=[];s.players[2].eliminated=true;assert.deepEqual(legalAttackAllTargets(s,91),[]);
+  s.players[2].eliminated=false;s.input.attacking.legalAssignments=[];assert.deepEqual(legalAttackAllTargets(s,91),[]);
 });

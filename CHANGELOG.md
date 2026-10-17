@@ -22,6 +22,10 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - No combate com vários defensores possíveis, escolha a criatura atacante e depois o jogador ou planeswalker que ela vai atacar. Quando há apenas um defensor possível, um clique continua sendo suficiente.
 - Salas de Commander mostram os assentos ocupados e as vagas; a partida começa quando todos entram. Reconectar preserva o assento, e jogadores eliminados podem acompanhar o restante da partida sem revelar mãos ocultas.
 
+### Corrigido
+
+- **Atacar com tudo** permite escolher o oponente ou planeswalker antes de atribuir os ataques. Apenas as criaturas que podem atacar o defensor escolhido são selecionadas; a confirmação dos atacantes continua separada.
+
 ## [0.7.0] - 2026-10-16
 
 ### Novo
