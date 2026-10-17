@@ -3,6 +3,9 @@ package mesadeduelo.bridge;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
+import java.util.concurrent.CountDownLatch;
+import forge.game.Game;
 
 import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
@@ -26,9 +29,14 @@ final class WebGuiGame extends ProtocolGuiGame {
     private volatile PlayerView me;
     private final BooleanSupplier autoPassNoActions;
 
-    WebGuiGame(IRemote remote, BooleanSupplier autoPassNoActions) {
+    private final MatchLifecycle lifecycle;
+    private final Supplier<Game> game;
+
+    WebGuiGame(IRemote remote, BooleanSupplier autoPassNoActions, MatchLifecycle lifecycle, Supplier<Game> game) {
         super(remote);
         this.autoPassNoActions = autoPassNoActions;
+        this.lifecycle = lifecycle;
+        this.game = game;
     }
 
     @Override
@@ -48,6 +56,11 @@ final class WebGuiGame extends ProtocolGuiGame {
                 controller.applyYieldUpdate(new YieldUpdate.SkipPhase(p, ph, isUiSetToSkipPhase(p, ph)));
             }
         }
+    }
+
+    @Override
+    public void awaitInput(CountDownLatch done) throws InterruptedException {
+        lifecycle.awaitInput(game.get(), me == null ? -1 : me.getId(), done);
     }
 
     @Override

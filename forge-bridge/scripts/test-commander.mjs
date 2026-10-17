@@ -110,8 +110,11 @@ try {
   },'commander first attack phase');
   const target=active.state.input.attacking.defenders.filter(d=>d.kind==='player').at(-1);
   const attackGen=active.state.input.gen;
+  const staleCount=()=>active.messages.filter(m=>m.type==='error'&&m.code==='stale-action').length;
+  let staleBefore=staleCount();
   active.send({type:'attack-all',defender:target.id,defenderKind:target.kind,gen:attackGen-1});
-  await wait(150); assert.equal(active.state.combat.length,0,'stale bulk attack must do nothing');
+  await until(()=>staleCount()>staleBefore,'stale bulk attack explicitly rejected');
+  assert.equal(active.state.combat.length,0,'stale bulk attack must do nothing');
   active.send({type:'attack-all',defender:target.id,defenderKind:target.kind,gen:active.state.input.gen});
   await until(()=>active.state.combat.some(row=>row.attacker===command.id),'explicit bulk attack assigned');
   const attackRow=active.state.combat.find(row=>row.attacker===command.id);
@@ -122,6 +125,33 @@ try {
   assert.equal(active.state.combat.find(row=>row.attacker===command.id).defender,target.id);
   active.send({type:'cancel',gen:active.state.input.gen});
   await until(()=>active.state.combat.length===0,'recall all preserved');
+
+  // Group assignment validates all IDs, moves existing assignments, and withdraws explicitly.
+  const firstTarget=active.state.input.attacking.defenders.find(d=>d.kind==='player' && d.id!==target.id);
+  const group=(defender,gen=active.state.input.gen)=>({type:'attack-group',attackers:[command.id],defender,
+    ...(defender===null?{}:{defenderKind:'player'}),gen});
+  for(const malformed of [
+    {...group(target.id),attackers:[command.id,own(active).hand[0].id]},
+    {...group(target.id),attackers:[command.id,command.id]},
+    {...group(target.id),attackers:[command.id+0.5]},
+    {type:'attack-group',attackers:[command.id],gen:active.state.input.gen},
+  ]) {
+    const count=active.messages.filter(m=>m.type==='error').length;
+    active.send(malformed);
+    await until(()=>active.messages.filter(m=>m.type==='error').length>count,'invalid group rejected');
+    assert.equal(active.state.combat.length,0,'invalid group cannot partially assign');
+  }
+  active.send(group(firstTarget.id));
+  await until(()=>active.state.combat.some(row=>row.attacker===command.id && row.defender===firstTarget.id),'first group assigned');
+  active.send(group(target.id));
+  await until(()=>active.state.combat.some(row=>row.attacker===command.id && row.defender===target.id),'selected group reassigned');
+  const repeatGen=active.state.input.gen; active.send(group(target.id));
+  await until(()=>active.state.input.gen>repeatGen,'idempotent group acknowledged');
+  assert.equal(active.state.combat.length,1); assert.equal(active.state.combat[0].defender,target.id);
+  staleBefore=staleCount(); active.send(group(null,active.state.input.gen-1));
+  await until(()=>staleCount()>staleBefore,'stale group withdrawal explicitly rejected');
+  assert.equal(active.state.combat.length,1,'stale withdrawal cannot remove assignment');
+  active.send(group(null)); await until(()=>active.state.combat.length===0,'selected group withdrawn');
 
   // A separate three-player AI match must progress while this human table waits.
   const solo=await peer(); solo.send({type:'start',config:config(3),you:deck,opponents:[deck,deck]});
@@ -161,17 +191,20 @@ try {
     const table = []; for (let i=0;i<count;i++) table.push(await peer());
     table[0].send({type:'host',config:config(count),deck});
     await until(()=>table[0].room,`${count}-human room created`);
-    for (let i=1;i<count;i++) table[i].send({type:'join',code:table[0].room.code,deck});
+    for (let i=1;i<count;i++) {
+      table[i].send({type:'join',code:table[0].room.code,deck});
+      await until(()=>table[i].room,`${count}-human seat ${i} joined`);
+    }
     await until(()=>table.every(p=>p.state?.players.length===count) && table.some(priority),`${count}-human opening`);
     for (const p of table) privacy(p);
     for (let i=1;i<count;i++) {
       table[i].send({type:'concede'});
-      await until(()=>table[0].state.players[i].eliminated,`${count}-human concession ${i}`);
+      await until(()=>table[0].state.players.find(row=>row.seat===table[i].room.seat).eliminated,`${count}-human concession ${i}`);
     }
     await until(()=>table[0].state.gameOver && table[0].state.match.over,`${count}-human result`);
     for (const p of table) p.send({type:'leave'});
   }
-  console.log('PASS: 2/3/4-player Commander AI; 2/3/4 humans; AI turns; 40 life; command-zone cast/tax; explicit bulk defender/stale guard/recall; exact seats/private hands; independent game progress; single-seat concede/leave; eliminated reconnect/spectating; last-survivor victory');
+  console.log('PASS: 2/3/4-player Commander AI; 2/3/4 humans; AI turns; 40 life; command-zone cast/tax; explicit bulk defender/stale guard/recall; atomic group validation/reassignment/withdrawal; exact seats/private hands; independent game progress; single-seat concede/leave; eliminated reconnect/spectating; last-survivor victory');
 } finally {
   for(const p of peers) if(p.ws.readyState===WebSocket.OPEN) p.send({type:'leave'});
   await wait(200); for(const p of peers)p.ws.close();

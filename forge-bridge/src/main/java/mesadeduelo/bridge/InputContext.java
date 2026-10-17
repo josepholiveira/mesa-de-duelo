@@ -24,6 +24,19 @@ final class InputContext {
     private InputContext() { }
     private static final Field ATTACK_COMBAT = field(InputAttack.class, "combat");
     private static final Field ATTACK_PLAYER = field(InputAttack.class, "playerAttacks");
+    private static final java.lang.reflect.Method ATTACK_CLEAR_BAND = clearBandMethod();
+    private static final forge.util.ITriggerEvent REMOVE_ATTACKER = new forge.util.ITriggerEvent() {
+        public int getButton() { return 3; }
+        public int getX() { return 0; }
+        public int getY() { return 0; }
+    };
+
+    private static java.lang.reflect.Method clearBandMethod() {
+        try {
+            var method = InputAttack.class.getDeclaredMethod("activateBand", forge.game.combat.AttackingBand.class);
+            method.setAccessible(true); return method;
+        } catch (ReflectiveOperationException e) { throw new ExceptionInInitializerError(e); }
+    }
     private static final Field ATTACKER = field(InputBlock.class, "currentAttacker");
     private static final Field COMBAT = field(InputBlock.class, "combat");
     private static final Field DEFENDER = field(InputBlock.class, "defender");
@@ -128,6 +141,41 @@ final class InputContext {
         else if (!attack.selectCard((Card) defender, null, null)) return false;
         for (Card attacker : legal) attack.selectCard(attacker, null, null);
         return !combat.getAttackers().isEmpty();
+    }
+
+    /** Validate the whole group before touching combat; assignment is idempotent, never a toggle. */
+    static boolean assignAttackGroup(Object input, java.util.List<Integer> attackerIds, Integer defenderId, String kind) {
+        if (!(input instanceof InputAttack attack) || attackerIds == null || attackerIds.isEmpty()
+            || (defenderId != null && !("player".equals(kind) || "card".equals(kind)))) return false;
+        Combat combat = (Combat) value(ATTACK_COMBAT, input);
+        Player player = (Player) value(ATTACK_PLAYER, input);
+        GameEntity defender = null;
+        if (defenderId != null) {
+            for (GameEntity candidate : combat.getDefenders())
+                if (candidate.getId() == defenderId && (candidate instanceof Player) == "player".equals(kind)) defender = candidate;
+            if (defender == null) return false;
+        }
+        java.util.Map<Integer, Card> owned = new java.util.HashMap<>();
+        for (Card card : player.getCreaturesInPlay()) owned.put(card.getId(), card);
+        java.util.Set<Integer> unique = new java.util.HashSet<>();
+        java.util.List<Card> selected = new java.util.ArrayList<>();
+        for (Integer id : attackerIds) {
+            Card card = owned.get(id);
+            if (!unique.add(id) || card == null || !player.equals(card.getController())
+                || (defender != null && !CombatUtil.canAttack(card, defender))) return false;
+            selected.add(card);
+        }
+        if (defender == null) {
+            for (Card card : selected) if (combat.isAttacking(card)) attack.selectCard(card, null, REMOVE_ATTACKER);
+            return true;
+        }
+        // Native band selection is UI state, not part of the explicit group being assigned.
+        try { ATTACK_CLEAR_BAND.invoke(attack, new Object[]{null}); }
+        catch (ReflectiveOperationException e) { throw new IllegalStateException(e); }
+        if (defender instanceof Player target) attack.selectPlayer(target, null);
+        else if (!attack.selectCard((Card) defender, null, null)) return false;
+        for (Card card : selected) if (!combat.isAttacking(card, defender)) attack.selectCard(card, null, null);
+        return true;
     }
 
     static JsonObject blocking(Object input) {

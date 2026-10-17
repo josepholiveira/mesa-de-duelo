@@ -58,6 +58,13 @@ final class HeadlessGui implements IGuiBase {
         return edt.await(answer);
     }
 
+    void runGameMutation(Runnable action) { edt.runGameMutation(action); }
+
+    <T> T awaitGameAnswer(CompletableFuture<T> answer, long timeoutMillis)
+            throws InterruptedException, ExecutionException, java.util.concurrent.TimeoutException {
+        return edt.awaitGameAnswer(answer, timeoutMillis);
+    }
+
     @Override public String getAssetsDir() { return assetsDir; }
     @Override public ImageFetcher getImageFetcher() { return null; }
     @Override public ISkinImage getSkinIcon(FSkinProp skinProp) { return null; }

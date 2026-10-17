@@ -19,12 +19,15 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 ### Mudou
 
 - A mesa mostra todos os oponentes, com vida em destaque, permanentes e zona de comando de cada um. Os campos usam toda a largura disponível e mantêm o tamanho quando a pilha ou uma janela aparece por cima. Fileiras cheias têm rolagem horizontal e controles nas bordas; a pilha flutua à direita, com cartas grandes, opção de recolher e galeria central.
-- No combate com vários defensores possíveis, escolha a criatura atacante e depois o jogador ou planeswalker que ela vai atacar. Quando há apenas um defensor possível, um clique continua sendo suficiente.
+- Na declaração de atacantes, selecione várias criaturas e depois o jogador ou planeswalker que elas vão atacar, ou escolha o defensor primeiro. Divida os ataques em grupos, troque o defensor e retire apenas as criaturas selecionadas antes de confirmar. Cliques rápidos são preservados enquanto o jogo atualiza as atribuições.
 - Salas de Commander mostram os assentos ocupados e as vagas; a partida começa quando todos entram. Reconectar preserva o assento, e jogadores eliminados podem acompanhar o restante da partida sem revelar mãos ocultas.
 
 ### Corrigido
 
 - **Atacar com tudo** permite escolher o oponente ou planeswalker antes de atribuir os ataques. Apenas as criaturas que podem atacar o defensor escolhido são selecionadas; a confirmação dos atacantes continua separada.
+- Ações de ataque desatualizadas liberam os controles para uma nova tentativa, sem travar a declaração de atacantes.
+- O carregamento das imagens das cartas não interrompe cliques em andamento.
+- Corrigidas falhas ao sair durante a abertura ou encerrar uma sala com vários jogadores. As decisões pendentes são liberadas, e as outras partidas continuam funcionando.
 
 ## [0.7.0] - 2026-10-16
 

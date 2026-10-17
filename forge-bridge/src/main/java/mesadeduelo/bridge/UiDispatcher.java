@@ -51,5 +51,18 @@ final class UiDispatcher implements AutoCloseable {
         }
     }
 
+    void runGameMutation(Runnable action) {
+        gate.lock();
+        try { action.run(); } finally { gate.unlock(); }
+    }
+
+    <T> T awaitGameAnswer(CompletableFuture<T> answer, long timeoutMillis)
+            throws InterruptedException, ExecutionException, java.util.concurrent.TimeoutException {
+        boolean held = gate.isHeldByCurrentThread();
+        if (held) gate.unlock();
+        try { return answer.get(timeoutMillis, TimeUnit.MILLISECONDS); }
+        finally { if (held) gate.lock(); }
+    }
+
     @Override public void close() { workers.shutdownNow(); }
 }

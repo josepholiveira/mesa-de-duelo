@@ -16,7 +16,7 @@ const setup = (count = 4, planeswalker = false) => evaluate(`
   if(${planeswalker}) { s.players[0].battlefield.push({id:49,name:'Garruk Wildspeaker',controller:10,planeswalker:true,tapped:false,token:false});targets.push({id:49,kind:'card'}); }
   s.input.attacking.defenders=targets;
   s.input.attacking.legalAssignments=[{attacker:102,defenders:targets}];
-  f.render();return gen;
+  f.view.attach(f.client,[]);f.render();return gen;
 `);
 
 try {

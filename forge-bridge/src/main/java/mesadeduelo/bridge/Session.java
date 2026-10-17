@@ -82,6 +82,7 @@ final class Session {
     private final AtomicBoolean dirty = new AtomicBoolean();
     private final AtomicInteger questionSeq = new AtomicInteger();
     private volatile HostedMatch match;
+    private volatile MatchLifecycle lifecycle = new MatchLifecycle();
 
     private record Question(int id, ProtocolMethod method, Object[] args, List<Object> options,
                             CompletableFuture<Object> answer, JsonObject json) { }
@@ -139,6 +140,13 @@ final class Session {
         matchId = UUID.randomUUID().toString();
         events.reset(); stateVersion.set(0);
         matchPhase = "playing"; gameNumber = 1; abandoned = false;
+        HostedMatch m = new HostedMatch();
+        MatchLifecycle life = new MatchLifecycle(game -> {
+            if (match != m) return;
+            if (game.isGameOver()) releaseQuestions();
+            markDirty();
+        });
+        lifecycle = life;
         List<RegisteredPlayer> players = new ArrayList<>();
         Map<RegisteredPlayer, IGuiGame> guis = new LinkedHashMap<>();
         Set<String> names = new java.util.HashSet<>();
@@ -148,7 +156,7 @@ final class Session {
             String name = seat.name;
             for (int n = 2; !names.add(name); n++) name = seat.name + " (" + n + ")";
             seat.name = name;
-            WebGuiGame g = new WebGuiGame(seat.new Remote(), () -> seat.autoPassNoActions);
+            WebGuiGame g = new WebGuiGame(seat.new Remote(m, life), () -> seat.autoPassNoActions, life, m::getGame);
             seat.gui = g;
             RegisteredPlayer rp = registered(seat.deck).setPlayer(new LobbyPlayerHuman(name));
             seat.registered = rp;
@@ -157,7 +165,6 @@ final class Session {
         }
         for (int i = 0; i < aiDecks.size(); i++)
             players.add(registered(aiDecks.get(i)).setPlayer(GamePlayerUtil.createAiPlayer(aiDecks.size() == 1 ? "Oponente" : "Oponente " + (i + 1))));
-        HostedMatch m = new HostedMatch();
         match = m;
         m.setEndGameHook(() -> ended(m));
         m.startMatch(config.rules(), null, players, guis, null);
@@ -235,23 +242,19 @@ final class Session {
 
     /** Abandona a partida atual: concede e libera a thread do jogo se ela estiver esperando uma resposta. */
     synchronized void stop() {
+        lifecycle.requestStop();
+        releaseQuestions();
+        match = null;
+        for (Seat seat : seats) { seat.gui = null; seat.me = null; }
+    }
+
+    private void releaseQuestions() {
         for (Seat seat : seats) {
             seat.inputGen.incrementAndGet();
             Question q = seat.question;
             seat.question = null;
             if (q != null) q.answer().complete(defaultAnswer(q));
         }
-        HostedMatch stopped = match;
-        if (stopped != null && !gameOver()) FThreads.invokeInEdtLater(() -> {
-            var game = stopped.getGame();
-            if (game == null || game.isGameOver()) return;
-            for (var player : game.getRegisteredPlayers()) player.concede();
-            game.getAction().checkGameOverCondition();
-            for (var player : game.getRegisteredPlayers())
-                if (player.getController() instanceof PlayerControllerHuman human) human.getInputQueue().onGameOver(true);
-        });
-        match = null;
-        for (Seat seat : seats) { seat.gui = null; seat.me = null; }
     }
 
     /** Explicit departure ends an unfinished series; a completed result remains intact. */
@@ -267,8 +270,10 @@ final class Session {
     /** Concede o jogo atual; entre jogos, encerra a partida sem inventar vitórias. */
     synchronized void concede(Seat seat) {
         if ("sideboarding".equals(matchPhase)) { abandoned = true; matchPhase = "complete"; markDirty(); }
-        IGameController c = seat.controller();
-        // A Commander concession removes one seat, preserving every other player's decision.
+        HostedMatch current = match;
+        if (current == null || current.getGame() == null || gameOver() || seat.me == null) return;
+        lifecycle.requestConcede(current.getGame(), seat.me.getId());
+        // Release answers after publishing the request, so the game thread sees it on wake-up.
         for (Seat each : seats) {
             if (config.commander() && each != seat) continue;
             Question q = each.question;
@@ -277,29 +282,17 @@ final class Session {
             if (q != null) q.answer().complete(defaultAnswer(q));
         }
         markDirty();
-        HostedMatch current = match;
-        if (c != null && current != null && !gameOver()) FThreads.invokeInEdtLater(() -> {
-            if (current != match) return;
-            c.concede();
-            if (current.getGameView().isGameOver()) for (Seat each : seats) {
-                Question pending = each.question; each.question = null;
-                each.inputGen.incrementAndGet(); each.clearInput();
-                if (pending != null) pending.answer().complete(defaultAnswer(pending));
-            }
-            if (c instanceof PlayerControllerHuman human) human.getInputQueue().onGameOver(true);
-            markDirty();
-        });
     }
 
     // ---------- Mensagens do navegador ----------
 
     void onClientMessage(Seat seat, Channel source, String type, JsonObject msg) {
-        if (seat.eliminated() && !Set.of("preferences", "hello").contains(type)) { markDirty(); return; }
+        if (seat.eliminated() && !Set.of("preferences", "hello").contains(type)) { rejectStaleAction(seat, type); return; }
         int actionGen = -1;
-        if (Set.of("card", "attack", "attack-all", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
-            if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { markDirty(); return; }
+        if (Set.of("card", "attack", "attack-all", "attack-group", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
+            if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { rejectStaleAction(seat, type); return; }
             actionGen = exactInt(msg.get("gen"));
-            if (actionGen != seat.inputGen.get() || seat.question != null || !"playing".equals(matchPhase)) { markDirty(); return; }
+            if (actionGen != seat.inputGen.get() || seat.question != null || !"playing".equals(matchPhase)) { rejectStaleAction(seat, type); return; }
         }
         final int genAtClick = actionGen;
         switch (type) {
@@ -341,10 +334,25 @@ final class Session {
             case "attack-all" -> {
                 int defender = exactInt(msg.get("defender"));
                 String kind = MatchConfig.string(msg, "defenderKind");
-                seat.onEdt(genAtClick, c -> {
+                seat.onEdt(genAtClick, type, c -> {
                     if (!(c instanceof PlayerControllerHuman human)
                         || !InputContext.assignAllAttackers(human.getInputQueue().getInput(), defender, kind))
                         seat.send(toast("error", "Não foi possível atacar com todas as criaturas. Escolha um defensor permitido antes de declarar atacantes."));
+                    markDirty();
+                });
+            }
+            case "attack-group" -> {
+                if (!msg.has("defender")) throw new IllegalArgumentException("Informe o defensor ou retire o grupo do combate.");
+                Integer defender = msg.get("defender").isJsonNull() ? null : exactInt(msg.get("defender"));
+                String kind = defender == null ? null : MatchConfig.string(msg, "defenderKind");
+                if (!msg.has("attackers") || !msg.get("attackers").isJsonArray())
+                    throw new IllegalArgumentException("Escolha um grupo de criaturas para atacar.");
+                List<Integer> attackers = new ArrayList<>();
+                for (JsonElement id : msg.getAsJsonArray("attackers")) attackers.add(exactInt(id));
+                seat.onEdt(genAtClick, type, c -> {
+                    if (!(c instanceof PlayerControllerHuman human)
+                        || !InputContext.assignAttackGroup(human.getInputQueue().getInput(), attackers, defender, kind))
+                        seat.send(toast("error", "Não foi possível atualizar os ataques desse grupo. Revise as criaturas selecionadas."));
                     markDirty();
                 });
             }
@@ -386,6 +394,16 @@ final class Session {
         }
     }
 
+    private void rejectStaleAction(Seat seat, String type) {
+        if ("attack-group".equals(type) || "attack-all".equals(type)) {
+            JsonObject error = new JsonObject();
+            error.addProperty("type", "error"); error.addProperty("code", "stale-action"); error.addProperty("action", type);
+            error.addProperty("text", "A etapa de ataque mudou. Revise a seleção e tente novamente.");
+            seat.send(error.toString());
+        }
+        markDirty();
+    }
+
     private static int exactInt(JsonElement value) {
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
             throw new IllegalArgumentException("Identificador inválido.");
@@ -425,7 +443,7 @@ final class Session {
 
     // ---------- Perguntas que bloqueiam a thread do jogo ----------
 
-    private Object ask(Seat seat, GuiGameEvent ev) {
+    private Object ask(Seat seat, GuiGameEvent ev, HostedMatch hosted, MatchLifecycle life) {
         Object[] a = ev.getObjects();
         JsonObject q = new JsonObject();
         List<Object> options = new ArrayList<>();
@@ -557,12 +575,28 @@ final class Session {
         }
 
         Question question = new Question(id, ev.getMethod(), a, options, new CompletableFuture<>(), q);
-        if (seat.eliminated()) return defaultAnswer(question);
+        var game = hosted.getGame();
+        int playerId = seat.me == null ? -1 : seat.me.getId();
+        if (life.cancelled() || life.isConceding(game, playerId) || seat.eliminated()) return defaultAnswer(question);
         seat.question = question;
+        // A close can race the precheck: publish first, then observe its cancellation flag again.
+        if (life.cancelled() || life.isConceding(game, playerId) || seat.eliminated() || (game != null && game.isGameOver()))
+            question.answer().complete(defaultAnswer(question));
         markDirty();
         try {
-            return GuiBase.getInterface() instanceof HeadlessGui headless
-                ? headless.awaitBrowserAnswer(question.answer()) : question.answer().get();
+            if (FThreads.isGuiThread() && GuiBase.getInterface() instanceof HeadlessGui headless)
+                return headless.awaitBrowserAnswer(question.answer());
+            while (true) {
+                life.pump(game);
+                if (life.cancelled() || game.isGameOver() || life.isConceding(game, playerId))
+                    question.answer().complete(defaultAnswer(question));
+                try {
+                    return GuiBase.getInterface() instanceof HeadlessGui headless
+                        ? headless.awaitGameAnswer(question.answer(), 50)
+                        : question.answer().get(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
+                catch (java.util.concurrent.TimeoutException waiting) { /* Pump this game's lifecycle only. */ }
+            }
         } catch (Exception e) {
             return defaultAnswer(question);
         } finally {
@@ -1049,16 +1083,27 @@ final class Session {
         }
 
         private void onEdt(int generation, java.util.function.Consumer<IGameController> action) {
+            onEdt(generation, null, action);
+        }
+
+        private void onEdt(int generation, String type, java.util.function.Consumer<IGameController> action) {
             IGameController c = controller();
-            if (c != null) FThreads.invokeInEdtLater(() -> { if (generation == inputGen.get() && question == null && "playing".equals(matchPhase) && c == controller()) action.accept(c); else markDirty(); });
+            if (c == null) { rejectStaleAction(this, type); return; }
+            FThreads.invokeInEdtLater(() -> {
+                if (generation == inputGen.get() && question == null && "playing".equals(matchPhase) && c == controller()) action.accept(c);
+                else rejectStaleAction(this, type);
+            });
         }
 
         /** Recebe as chamadas do ProtocolGuiGame deste jogador. */
         private final class Remote implements IRemote {
             private final String belongsToMatch = matchId;
+            private final HostedMatch hosted;
+            private final MatchLifecycle life;
+            Remote(HostedMatch hosted, MatchLifecycle life) { this.hosted = hosted; this.life = life; }
             @Override
             public void send(NetEvent event) {
-                if (!belongsToMatch.equals(matchId) || !(event instanceof GuiGameEvent ev)) return;
+                if (life.cancelled() || !belongsToMatch.equals(matchId) || !(event instanceof GuiGameEvent ev)) return;
                 Object[] a = ev.getObjects();
                 switch (ev.getMethod()) {
                     case openView -> {
@@ -1104,8 +1149,7 @@ final class Session {
 
             @Override
             public Object sendAndWait(IdentifiableNetEvent event) {
-                if (!belongsToMatch.equals(matchId)) throw new IllegalStateException("Previous match is closed");
-                return ask(Seat.this, (GuiGameEvent) event);
+                return ask(Seat.this, (GuiGameEvent) event, hosted, life);
             }
         }
     }

@@ -19,7 +19,7 @@ import './gameplay.css';
 import './phaseHud.css';
 import './gameOptions.css';
 import './decisionPrompt.css';
-import { tablePlayers, validAttackSelection, legalAttackTargets, attackPairAction, legalAttackAllTargets, attackAllAction, canPlayCommander, type AttackSelection, type Defender } from './commanderTable';
+import { tablePlayers, validAttackSelection, legalAttackTargets, legalAttackGroupTargets, availableAttackTargets, attackScope, AttackQueue, legalAttackAllTargets, attackAllAction, canPlayCommander, type Defender } from './commanderTable';
 import './commanderTable.css';
 
 const ICON_SWORD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3H21v6.5L10 20.5l-2 .5-.5-2L18.5 8V5.5H16L5 16.5 3.5 15z" fill="currentColor"/></svg>';
@@ -162,7 +162,11 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   let qState: { id: number; picked: number[]; text: string; amounts: string[] } | null = null;
   let groupIds: number[] | null = null;
   let selectedBlocker: BlockSelection | null = null;
-  let selectedAttacker: AttackSelection | null = null;
+  const selectedAttackers = new Set<number>();
+  let attackSelectionGen = -1;
+  let pinnedDefender: Defender | null = null;
+  let attackContext: string | null = null;
+  const attackQueue = new AttackQueue();
   let attackAllGen: number | null = null;
   let stackGalleryOpen = false;
   let stackMinimized = false;
@@ -337,6 +341,26 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   /** Nomes já pedidos ao Scryfall: o que ele não conhece (fichas, nomes do Forge) não é pedido de novo a cada desenho. */
   const asked = new Set<string>();
   let fetchTimer = 0;
+  const artworkPointers = new Set<number>();
+  let artworkPending = false;
+  let artworkTimer = 0;
+  function renderArtwork() {
+    if (artworkPointers.size) { artworkPending = true; return; }
+    artworkPending = false;
+    renderTable(false);
+  }
+  function releaseArtworkPointer(event?: PointerEvent) {
+    if (event) artworkPointers.delete(event.pointerId); else artworkPointers.clear();
+    if (!artworkPointers.size && artworkPending) {
+      clearTimeout(artworkTimer);
+      // Let the native click finish before a cosmetic update replaces its pressed card.
+      artworkTimer = window.setTimeout(renderArtwork, 0);
+    }
+  }
+  root.addEventListener('pointerdown', event => artworkPointers.add(event.pointerId), true);
+  window.addEventListener('pointerup', releaseArtworkPointer, true);
+  window.addEventListener('pointercancel', releaseArtworkPointer, true);
+  window.addEventListener('blur', () => releaseArtworkPointer());
   function image(name: string | undefined, size: 'small' | 'normal') {
     if (!name) return undefined;
     const sc = cacheGet(name);
@@ -349,7 +373,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
         const names = [...wanted];
         wanted.clear();
         // Falha (sem rede, limite do Scryfall): libera os nomes para tentar de novo daqui a 30 s.
-        fetchByNames(names).then(render).catch(() => setTimeout(() => names.forEach(n => asked.delete(n)), 30_000));
+        fetchByNames(names).then(renderArtwork).catch(() => setTimeout(() => names.forEach(n => asked.delete(n)), 30_000));
       }, 150);
       return undefined;
     }
@@ -643,7 +667,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     else if (ci.block) tag = `<span class="tag blk">${ICON_SHIELD}${ci.block}</span>`;
     else if (attackers.length) tag = `<span class="tag atk">Atacado ${ICON_SWORD}${attackers.join(',')}</span>`;
     else if (c.creature && c.sick && c.controller === s.activePlayer) tag = '<span class="tag zzz">zZ</span>';
-    if (selectedAttacker?.attacker === c.id || (attackAllGen !== null && legalAttackTargets(s, { attacker: c.id, gen: attackAllGen }).length)) { inner.push('attack-selected'); tag = `<span class="tag block-pending">${ICON_SWORD}Escolha o defensor</span>`; }
+    if (selectedAttackers.has(c.id) || attackQueue.queuedAttackers.includes(c.id) || (attackAllGen !== null && legalAttackTargets(s, { attacker: c.id, gen: attackAllGen }).length)) { inner.push('attack-selected'); tag = `<span class="tag block-pending">${ICON_SWORD}Selecionada</span>`; }
     if (currentAttackTargets(s).some(target => target.kind === 'card' && target.id === c.id)) inner.push('attack-target');
     if (blockSelected) tag = `<span class="tag block-pending">${ICON_SHIELD}Selecionada</span>`;
     const loyalty = c.planeswalker ? c.counters?.LOYALTY ?? 0 : undefined;
@@ -780,21 +804,54 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       <div id="fField-${p.id}" class="field opp${s.activePlayer === p.id ? ' turn' : ''}">${seatRow(`fLands-${p.id}`, 'lands', p.name, backRow(s, p))}${seatRow(`fCreatures-${p.id}`, 'creatures', p.name, fieldRow(s, p.battlefield.filter(c => !isBackRow(c))))}</div>
     </section>`;
   }
+  function clearAttackChoice(reset = false) {
+    selectedAttackers.clear(); pinnedDefender = null; attackAllGen = null; attackSelectionGen = -1;
+    attackQueue.clear(reset);
+    if (reset) attackContext = null;
+  }
+  function flushAttacks(s: FState) {
+    if (!client || disconnected) return;
+    const action = attackQueue.next(s);
+    if (action) { stopPresentation(); hideCardPreview(true); client.send(action); }
+  }
+  function syncAttackChoice(s: FState) {
+    const context = attackScope(s);
+    if (disconnected || context === null || context !== attackContext) { clearAttackChoice(true); attackContext = context; }
+    attackQueue.observe(s);
+    if (attackSelectionGen !== s.input.gen) selectedAttackers.clear();
+    for (const attacker of selectedAttackers) if (!validAttackSelection(s, { attacker, gen: s.input.gen })) selectedAttackers.delete(attacker);
+    if (pinnedDefender && !availableAttackTargets(s).some(target => target.id === pinnedDefender!.id && target.kind === pinnedDefender!.kind)) pinnedDefender = null;
+    if (attackAllGen !== null && !legalAttackAllTargets(s, attackAllGen).length) attackAllGen = null;
+    flushAttacks(s);
+  }
   function currentAttackTargets(s: FState) {
-    return attackAllGen === null ? legalAttackTargets(s, selectedAttacker) : legalAttackAllTargets(s, attackAllGen);
+    return attackAllGen !== null ? legalAttackAllTargets(s, attackAllGen)
+      : selectedAttackers.size ? legalAttackGroupTargets(s, [...selectedAttackers], attackSelectionGen) : availableAttackTargets(s);
+  }
+  function defenderName(s: FState, defender: Defender) {
+    return defender.kind === 'player' ? s.players.find(p => p.id === defender.id)?.name ?? 'Jogador' : findCard(defender.id)?.name ?? 'Permanente';
   }
   function chooseAttackDefender(s: FState, defender: Defender, gen: number) {
-    if (!client || disconnected || (attackAllGen !== null && attackAllGen !== gen)) return;
-    const action = attackAllGen === null ? attackPairAction(s, selectedAttacker, defender, gen) : attackAllAction(s, defender, gen);
-    if (!action) return;
-    selectedAttacker = null; attackAllGen = null; stopPresentation(); hideCardPreview(true); client.send(action); renderTable(false);
+    if (!client || disconnected || gen !== s.input.gen || !currentAttackTargets(s).some(target => target.id === defender.id && target.kind === defender.kind)) return;
+    if (attackAllGen !== null) {
+      if (attackQueue.busy) return;
+      const action = attackAllAction(s, defender, gen);
+      if (!action) return;
+      clearAttackChoice(); attackQueue.markSent(s, action); stopPresentation(); hideCardPreview(true); client.send(action);
+    } else if (selectedAttackers.size) {
+      attackQueue.enqueue([...selectedAttackers], defender);
+      selectedAttackers.clear(); pinnedDefender = null;
+      flushAttacks(s);
+    } else pinnedDefender = defender;
+    hideCardPreview(true); renderTable(false);
   }
   function attackChoices(s: FState) {
-    if (attackAllGen === null && !validAttackSelection(s, selectedAttacker)) return '';
+    if (attackAllGen === null && !selectedAttackers.size && !pinnedDefender && !attackQueue.queuedAttackers.length) return '';
+    const removable = [...selectedAttackers].some(id => s.combat.some(pair => pair.attacker === id));
     return `<div class="attack-choices" aria-label="Escolher defensor">${currentAttackTargets(s).map(target => {
-      const name = target.kind === 'player' ? s.players.find(p => p.id === target.id)?.name : findCard(target.id)?.name;
-      return `<button class="arena-btn secondary" data-defender="${target.id}" data-defender-kind="${target.kind}" data-gen="${s.input.gen}">${esc(name ?? 'Defensor')}</button>`;
-    }).join('')}${attackAllGen === null ? '<button class="icon-btn" data-ui="attack-clear">Limpar seleção</button>' : ''}</div>`;
+      const pinned = pinnedDefender?.id === target.id && pinnedDefender.kind === target.kind;
+      return `<button class="arena-btn ${pinned ? 'primary' : 'secondary'}" data-defender="${target.id}" data-defender-kind="${target.kind}" data-gen="${s.input.gen}" aria-pressed="${pinned}">${esc(defenderName(s, target))}</button>`;
+    }).join('')}${removable ? '<button class="arena-btn secondary" data-ui="attack-remove">Retirar do combate</button>' : ''}${attackAllGen === null ? '<button class="icon-btn" data-ui="attack-clear">Limpar seleção</button>' : ''}</div>`;
   }
 
   function zoneView(s: FState) {
@@ -943,10 +1000,10 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }
     const decision = cardDecision(s);
     const handCount = s.players.find(p => p.id === s.you)?.hand.length ?? 0;
-    const ok = s.input.suspendCast ? { ...s.input.ok, label: 'Conjurar agora' } : s.input.blocking ? { ...s.input.ok, label: 'Confirmar bloqueios' } : s.input.attacking ? { ...s.input.ok, label: 'Confirmar atacantes', enabled: s.input.ok.enabled && attackAllGen === null } : s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
+    const ok = s.input.suspendCast ? { ...s.input.ok, label: 'Conjurar agora' } : s.input.blocking ? { ...s.input.ok, label: 'Confirmar bloqueios' } : s.input.attacking ? { ...s.input.ok, label: 'Confirmar atacantes', enabled: s.input.ok.enabled && attackAllGen === null && !selectedAttackers.size && !attackQueue.busy } : s.input.opening === 'play-draw' ? { ...s.input.ok, label: 'Eu jogo' }
       : s.input.opening === 'mulligan' ? { ...s.input.ok, label: `Manter ${handCount}` } : decision ? { ...s.input.ok, label: 'Confirmar seleção' } : s.input.ok;
     const cancel = attackAllGen !== null ? { ...s.input.cancel, label: 'Cancelar seleção' } : s.input.suspendCast ? { ...s.input.cancel, label: 'Deixar no exílio' } : s.input.opening === 'play-draw' ? { ...s.input.cancel, label: 'Oponente joga' } : s.input.cancel;
-    const waiting = clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS;
+    const waiting = (clickedGen === s.input.gen && Date.now() - clickedAt < CLICK_LOCK_MS) || (!!s.input.attacking && attackQueue.busy);
     const b = (act: string, btn: { label: string; enabled: boolean }, kind: string) =>
       btn.label ? `<button class="arena-btn ${kind}" data-act="${act}"${act === 'cancel' && attackAllGen !== null ? ' data-ui="attack-clear"' : ''} data-gen="${s.input.gen}" ${btn.enabled && !waiting ? '' : 'disabled'}>${esc(btn.label)}</button>` : '';
     const mine = s.activePlayer === s.you;
@@ -1053,8 +1110,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     }
     if (!validBlockSelection(s, selectedBlocker)) selectedBlocker = null;
     const visual = stateWithFrame(s, displayFrame);
-    if (!validAttackSelection(s, selectedAttacker)) selectedAttacker = null;
-    if (attackAllGen !== null && !legalAttackAllTargets(s, attackAllGen).length) attackAllGen = null;
+    syncAttackChoice(s);
     const { me, opponents } = tablePlayers(visual);
     const opp = opponents[0];
     const multiplayer = visual.players.length > 2;
@@ -1116,7 +1172,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const promptCard = !s.input.suspendCast && pc && !pc.faceDown && pc.name && !findCard(pc.id, false)
       ? `<div class="prompt-card" data-peek="${pc.id}">${face(pc, 'normal')}</div>` : '';
     const opening = s.input.opening;
-    const prompt = s.input.attacking ? attackAllGen !== null ? 'Atacar com tudo: escolha quem atacar.' : selectedAttacker ? `${label(findCard(selectedAttacker.attacker)!)}: escolha quem atacar. Escolher o defensor atual remove esse ataque.` : 'Escolha uma criatura sua e depois o jogador ou a permanente que ela vai atacar.'
+    const prompt = s.input.attacking ? attackAllGen !== null ? 'Atacar com tudo: escolha quem atacar.' : selectedAttackers.size ? `${selectedAttackers.size} ${selectedAttackers.size === 1 ? 'criatura selecionada' : 'criaturas selecionadas'}: escolha quem atacar.` : pinnedDefender ? `Atacar ${defenderName(s, pinnedDefender)}: escolha suas criaturas. Limpe a seleção para escolher as cartas primeiro.` : 'Selecione suas criaturas e escolha quem atacar, ou escolha o defensor primeiro.'
       : s.input.suspendCast ? 'Suspender: conjure agora sem pagar o custo de mana ou deixe a carta no exílio.'
       : s.input.blocking ? selectedBlocker ? `${label(findCard(selectedBlocker.blocker)!)}: escolha o atacante. Se já estiver bloqueando esse atacante, o clique remove o bloqueio.` : 'Escolha uma criatura sua e depois o atacante que ela vai bloquear.'
       : s.input.priority && !s.input.paying && !s.input.targeting ? '' : opening === 'starting-player' || opening === 'play-draw' || opening === 'mulligan' || (opening === 'mulligan-bottom' && s.input.openingReturnCount !== undefined) ? ''
@@ -1246,6 +1302,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   }
 
   function notice(text: string, error = false) {
+    if (error && client?.state?.input.attacking && attackQueue.busy) { clearAttackChoice(true); renderTable(false); }
     if (error && client?.state?.sideboarding) { sideboardError = text; sideboardBusy = false; render(); }
     const el = document.createElement('div');
     el.className = `toast ${error ? 'error' : ''}`;
@@ -1262,12 +1319,13 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (gen === clickedGen && Date.now() - clickedAt < CLICK_LOCK_MS) return;
     if (s.input.attacking) {
       if (attackAllGen !== null) {
-        if (act === 'cancel') { attackAllGen = null; selectedAttacker = null; renderTable(false); }
+        if (act === 'cancel') { clearAttackChoice(); renderTable(false); }
         return;
       }
+      if (attackQueue.busy || (act === 'ok' && selectedAttackers.size)) return;
       if (act === 'cancel' && !s.combat.length) {
         const targets = legalAttackAllTargets(s, gen);
-        selectedAttacker = null;
+        clearAttackChoice();
         if (!targets.length) { announce('Nenhuma criatura pode atacar um defensor permitido.'); return; }
         attackAllGen = gen;
         if (targets.length === 1) chooseAttackDefender(s, targets[0], gen);
@@ -1275,6 +1333,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
         return;
       }
     }
+    if (s.input.attacking) clearAttackChoice();
     clickedGen = gen; clickedAt = Date.now(); selectedBlocker = null;
     stopPresentation(); hideCardPreview(true);
     client.send({ type: act, gen });
@@ -1350,7 +1409,14 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     if (purePeek && !purePeek.closest('[data-gy]')) { showPreview(cardFromElement(purePeek), purePeek, true); return; }
     const renderedQuestion = t.closest<HTMLElement>('[data-qid]');
     if (renderedQuestion && Number(renderedQuestion.dataset.qid) !== client?.state?.question?.id) return;
-    if (ui === 'attack-clear') { selectedAttacker = null; attackAllGen = null; renderTable(false); return; }
+    if (ui === 'attack-clear') { clearAttackChoice(); renderTable(false); return; }
+    if (ui === 'attack-remove') {
+      const s = client?.state;
+      if (!s || disconnected || attackSelectionGen !== s.input.gen) return;
+      const attackers = [...selectedAttackers].filter(id => s.combat.some(pair => pair.attacker === id));
+      if (attackers.length) { attackQueue.enqueue(attackers, null); selectedAttackers.clear(); pinnedDefender = null; flushAttacks(s); renderTable(false); }
+      return;
+    }
     if (ui === 'menu') { setMenu($('#fMenu').hidden); return; }
     if (ui === 'log') { setLog($('#fLogDrawer').hidden, true); return; }
     if (ui === 'fullscreen') { void toggleFullscreen(); return; }
@@ -1405,7 +1471,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       return;
     }
     const pl = t.closest<HTMLElement>('[data-pid]');
-    if (pl && client.state?.input.attacking && (selectedAttacker || attackAllGen !== null)) {
+    if (pl && client.state?.input.attacking) {
       chooseAttackDefender(client.state, { id: Number(pl.dataset.pid), kind: 'player' }, Number(pl.dataset.gen));
       return;
     }
@@ -1415,21 +1481,23 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     const s = client.state!;
     const id = Number(cd.dataset.fid), gen = Number(cd.dataset.gen);
     if (s.input.attacking && cd.closest('.field')) {
-      if (attackAllGen !== null && currentAttackTargets(s).some(target => target.kind === 'card' && target.id === id)) { chooseAttackDefender(s, { id, kind: 'card' }, gen); return; }
       if (s.input.attacking.attackers.includes(id)) {
         attackAllGen = null;
-        const selection = { attacker: id, gen };
-        const targets = legalAttackTargets(s, selection);
-        if (targets.length === 1) {
-          const action = attackPairAction(s, selection, targets[0], gen);
-          if (action) { selectedAttacker = null; stopPresentation(); hideCardPreview(true); client.send(action); }
-          return;
+        if (selectedAttackers.has(id)) selectedAttackers.delete(id);
+        else if (attackQueue.queuedAttackers.includes(id)) attackQueue.deselect(id);
+        else {
+          const targets = legalAttackTargets(s, { attacker: id, gen });
+          const assigned = s.combat.some(pair => pair.attacker === id);
+          if (pinnedDefender && !assigned) {
+            if (targets.some(target => target.id === pinnedDefender!.id && target.kind === pinnedDefender!.kind)) { attackQueue.enqueue([id], pinnedDefender); flushAttacks(s); }
+            else announce('Essa criatura não pode atacar o defensor escolhido.');
+          } else if (!selectedAttackers.size && targets.length === 1 && !pinnedDefender) {
+            attackQueue.enqueue([id], assigned ? null : targets[0]); flushAttacks(s);
+          } else { selectedAttackers.add(id); attackSelectionGen = gen; }
         }
-        selectedAttacker = selectedAttacker?.attacker === id ? null : selection;
         hideCardPreview(true); renderTable(false); return;
       }
-      const action = attackPairAction(s, selectedAttacker, { id, kind: 'card' }, gen);
-      if (action) { selectedAttacker = null; stopPresentation(); client.send(action); renderTable(false); }
+      chooseAttackDefender(s, { id, kind: 'card' }, gen);
       return;
     }
     if (cd.hasAttribute('data-command-card') && !canPlayCommander(s, id, gen)) { showPreview(findCard(id), cd, true); return; }
@@ -1514,7 +1582,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       if (!$('#fSettings').hidden) { e.preventDefault(); setSettings(false); return; }
       if (!$('#fMenu').hidden) { e.preventDefault(); setMenu(false, true); return; }
       if (!$('#fLogDrawer').hidden) { e.preventDefault(); setLog(false, true); return; }
-      if (selectedAttacker || attackAllGen !== null) { selectedAttacker = null; attackAllGen = null; e.preventDefault(); renderTable(false); return; }
+      if (selectedAttackers.size || pinnedDefender || attackAllGen !== null || attackQueue.queuedAttackers.length) { clearAttackChoice(); e.preventDefault(); renderTable(false); return; }
       if (selectedBlocker) { selectedBlocker = null; e.preventDefault(); renderTable(false); return; }
       if (stackGalleryOpen) { e.preventDefault(); closeStackGallery(); return; }
       if (zoneOf !== null || groupIds) { closeZone(); return; }
@@ -1545,8 +1613,9 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
   return {
     attach(c, pics) {
       autoPass.reset();
+      artworkPointers.clear(); artworkPending = false; clearTimeout(artworkTimer);
       client = c; portraits = pics; lastTurn = 0; disconnected = false; qState = null; clickedGen = -1; zoneOf = null;
-      lastDamage = new Map(); groupIds = null; selectedBlocker = null; selectedAttacker = null; attackAllGen = null;
+      lastDamage = new Map(); groupIds = null; selectedBlocker = null; clearAttackChoice(true);
       stackGalleryOpen = false; stackMinimized = false; $('#fStackGallery').hidden = true;
       handDrag.cancel(); stopPresentation(); timeline.reset(); silentNext = true; hideCardPreview(true);
       sideboardDraft = null; sideboardBusy = false; sideboardError = '';
@@ -1559,7 +1628,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
     render,
     notice,
     reconnecting(attempt) {
-      disconnected = true; autoPass.reset(); syncAutoPass();
+      disconnected = true; clearAttackChoice(true); autoPass.reset(); syncAutoPass();
       if (stackGalleryOpen) closeStackGallery();
       handDrag.cancel(); stopPresentation(); silentNext = true;
       const ov = $('#fOverlay');
@@ -1571,7 +1640,7 @@ export function createForgeTableView(root: HTMLElement, opts: ForgeTableOptions)
       syncModal();
     },
     disconnected(reason) {
-      disconnected = true; autoPass.reset(); syncAutoPass();
+      disconnected = true; clearAttackChoice(true); autoPass.reset(); syncAutoPass();
       if (stackGalleryOpen) closeStackGallery();
       handDrag.cancel(); stopPresentation(); silentNext = true;
       const room = !!client?.state?.session;
