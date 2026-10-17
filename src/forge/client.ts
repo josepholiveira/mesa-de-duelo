@@ -3,10 +3,10 @@ import type { DeckData, DeckEntry, DeckFormat } from '../decks';
 /** Cliente da ponte do Forge (forge-bridge). Formato das mensagens descrito em forge-bridge/README.md. */
 
 export interface FPreferences { autoPassNoActions: boolean }
-export interface MatchConfig { format: DeckFormat; matchLength: 'bo1' | 'bo3' }
+export interface MatchConfig { format: DeckFormat; matchLength: 'bo1' | 'bo3'; playerCount?: number }
 export interface ValidationIssue { code: string; message: string; card?: string; section?: string }
-export interface DeckValidation { valid: boolean; issues: ValidationIssue[]; mainCount?: number; sideboardCount?: number; rulesVersion: string; engineVersion: string }
-export interface RoomInfo { code: string; config: MatchConfig; available: boolean; players: {name: string; connected: boolean}[]; rulesVersion: string; engineVersion: string }
+export interface DeckValidation { valid: boolean; issues: ValidationIssue[]; mainCount?: number; sideboardCount?: number; commanderCount?: number; rulesVersion: string; engineVersion: string }
+export interface RoomInfo { code: string; config: MatchConfig; available: boolean; capacity?: number; players: {name: string; connected: boolean; seat?: number; playerId?: number; eliminated?: boolean}[]; rulesVersion: string; engineVersion: string }
 export interface FEvent {
   seq: number; stateVersion: number;
   type: 'land-played' | 'spell-cast' | 'ability-activated' | 'resolved' | 'countered' | 'entered' | 'left' | 'attackers' | 'blockers' | 'damage' | 'life-changed' | 'turn' | 'priority' | 'draw' | 'stack-removed';
@@ -60,8 +60,10 @@ export interface FCard {
 
 export interface FPlayer {
   id: number;
+  seat?: number;
   name: string;
   ai: boolean;
+  eliminated?: boolean;
   life: number;
   library: number;
   handCount: number;
@@ -69,6 +71,9 @@ export interface FPlayer {
   battlefield: FCard[];
   graveyard: FCard[];
   exile: FCard[];
+  commandZone?: FCard[];
+  commanders?: { id: number; name: string; casts: number; tax: number }[];
+  commanderDamage?: { commanderId: number; damage: number }[];
   /** Emblemas na zona de comando (nome "Emblem — Planeswalker"). */
   emblems?: FCard[];
   pool: Record<string, number>;
@@ -99,10 +104,11 @@ export interface FRoom {
   seat: number;
   token: string;
   started: boolean;
+  capacity?: number;
   config: MatchConfig;
   rulesVersion?: string;
   engineVersion?: string;
-  players: { name: string; connected: boolean; rematch: boolean }[];
+  players: { name: string; connected: boolean; rematch: boolean; seat?: number; playerId?: number; eliminated?: boolean }[];
 }
 
 export interface FState {
@@ -121,6 +127,7 @@ export interface FState {
   phase: string | null;
   activePlayer: number | null;
   gameOver: boolean;
+  spectating?: boolean;
   winner?: string;
   players: FPlayer[];
   /** Cartas do cemitério ou do exílio (de qualquer jogador) que você pode usar agora: flashback, tramadas... */
@@ -130,7 +137,7 @@ export interface FState {
   /** Cartas suspensas e cartas cujo gatilho de suspender ainda está na pilha. */
   suspendedExile?: number[];
   stack: { id: number; text: string; source?: FCard; controller?: number; targets?: FTargets }[];
-  combat: { attacker: number; defender?: number; blockers: number[] }[];
+  combat: { attacker: number; defender?: number; defenderKind?: 'player' | 'card'; blockers: number[] }[];
   log: string[];
   you: number;
   /** gen: versão do prompt; acompanha os cliques em OK/Cancelar para a ponte descartar cliques atrasados. */
@@ -138,13 +145,14 @@ export interface FState {
   /** card: carta citada pelo prompt (ex.: a do topo do grimório na vidência ou na vigilância de 1). */
   /** paying: pagando um custo de mana; a mana da reserva pode ser gasta com {type:"mana", color}. */
   /** targeting: escolhendo alvos; source é a carta que alveja (card traz os dados dela) e o resto são os alvos já escolhidos. */
-  input: { gen: number; priority?: boolean; opening?: 'play-draw' | 'mulligan' | 'mulligan-bottom'; openingStartingPlayer?: number; openingReturnCount?: number; openingReturnRemaining?: number; openingSelected?: number[]; message: string; ok: FButton; cancel: FButton; selectable: number[]; selectableStacks?: number[]; selectablePlayers?: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
+  input: { gen: number; priority?: boolean; opening?: 'starting-player' | 'play-draw' | 'mulligan' | 'mulligan-bottom'; openingStartingPlayer?: number; openingReturnCount?: number; openingReturnRemaining?: number; openingSelected?: number[]; message: string; ok: FButton; cancel: FButton; selectable: number[]; selectableStacks?: number[]; selectablePlayers?: number[]; actionable?: number[]; card?: FCard; paying?: boolean;
     /** Cartas selecionadas pelo motor no prompt atual, com os limites reais da escolha. */
     selection?: { cards: number[]; min: number; max: number };
     /** Escolha de conjurar durante a resolução do gatilho de suspender; usa OK/Cancelar. */
     suspendCast?: { card: FCard };
     /** Atacantes e bloqueadores da declaração atual, identificados pela instância da carta. */
     blocking?: { selectedAttacker: number | null; attackers: number[]; blockers: number[]; legalAssignments: { blocker: number; attackers: number[] }[] };
+    attacking?: { attackers: number[]; defenders: { id: number; kind: 'player' | 'card' }[]; legalAssignments: { attacker: number; defenders: { id: number; kind: 'player' | 'card' }[] }[] };
     targeting?: FTargets & { source: number; card?: FCard } };
   question?: FQuestion;
   room?: FRoom;
@@ -157,7 +165,7 @@ export interface FState {
 export interface FTargets { cards?: number[]; players?: number[] }
 
 export type ClientMessage =
-  | { type: 'start'; you: unknown; opponent: unknown; config: MatchConfig }
+  | { type: 'start'; you: unknown; opponent: unknown; opponents?: unknown[]; config: MatchConfig }
   | { type: 'host'; name: string; deck: unknown; config: MatchConfig }
   | { type: 'join'; code: string; name: string; deck: unknown }
   | { type: 'rejoin'; code: string; token: string }
@@ -168,6 +176,7 @@ export type ClientMessage =
   | { type: 'preferences'; autoPassNoActions: boolean }
   | { type: 'card'; id: number; gen?: number }
   | { type: 'block'; attacker: number; blocker: number; gen: number }
+  | { type: 'attack'; attacker: number; defender: number; defenderKind: 'player' | 'card'; gen: number }
   | { type: 'stack'; id: number; gen?: number }
   | { type: 'player'; id: number; gen?: number }
   | { type: 'mana'; color: string; gen?: number }
@@ -222,7 +231,7 @@ export class ForgeClient {
     });
   }
 
-  validateDeck(deck: Pick<DeckData, 'name' | 'cards' | 'sideboard'>, format: DeckFormat): Promise<DeckValidation> {
+  validateDeck(deck: Pick<DeckData, 'name' | 'cards' | 'sideboard' | 'commanders'>, format: DeckFormat): Promise<DeckValidation> {
     return this.request({type: 'validate-deck', format, deck});
   }
 

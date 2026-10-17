@@ -33,12 +33,12 @@ export function applyOpeningPresentation(root: HTMLElement, state: FState) {
     arena.append(heading);
   }
   const { openingStartingPlayer, openingReturnCount } = state.input;
-  heading.querySelector('h1')!.textContent = opening === 'play-draw' ? 'Quem começa?'
+  heading.querySelector('h1')!.textContent = (opening === 'play-draw' || opening === 'starting-player') ? 'Quem começa?'
     : opening === 'mulligan-bottom'
       ? openingReturnCount == null ? 'Escolha as cartas para devolver'
         : openingReturnCount === 1 ? 'Devolva 1 carta' : `Devolva ${openingReturnCount} cartas`
       : 'Sua mão inicial';
-  heading.querySelector('p')!.textContent = opening === 'play-draw' ? 'Escolha quem joga o primeiro turno.'
+  heading.querySelector('p')!.textContent = (opening === 'play-draw' || opening === 'starting-player') ? 'Escolha quem joga o primeiro turno.'
     : opening === 'mulligan-bottom' ? 'As cartas escolhidas vão para o fundo do grimório.'
       : openingStartingPlayer == null ? 'Mantenha estas cartas ou tente uma nova mão.'
         : openingStartingPlayer === state.you ? 'Você joga primeiro.' : 'O oponente joga primeiro.';

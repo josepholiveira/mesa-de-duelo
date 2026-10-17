@@ -131,12 +131,13 @@ export function createMotion(root: HTMLElement): Motion {
       const bounds = layer().getBoundingClientRect();
       const stage: Point = { cx: bounds.left + bounds.width * .5, cy: bounds.top + bounds.height * .48, w: Math.min(112, bounds.height * .17), h: Math.min(156, bounds.height * .237) };
       const mine = event.actor === options.you;
-      const hand = center(root.querySelector(mine ? '#fHand' : '#fOppHand')) ?? center(root.querySelector(mine ? '#fMeAvatar' : '#fOppAvatar')) ?? stage;
+      const seat = !mine && event.actor !== undefined ? root.querySelector(`[data-seat-player="${event.actor}"]`) : null;
+      const hand = center(seat?.querySelector('.seat-hand')) ?? center(root.querySelector(mine ? '#fHand' : '#fOppHand')) ?? center(root.querySelector(mine ? '#fMeAvatar' : '#fOppAvatar')) ?? stage;
       const target = center(card);
       let from: Point = old ?? hand, to: Point = stage;
       if (event.type === 'land-played' || event.type === 'entered') {
         from = event.from === 'Stack' ? stage : hand;
-        to = target ?? center(root.querySelector(mine ? '#fMeLands' : '#fOppLands')) ?? stage;
+        to = target ?? center(seat?.querySelector('.lands')) ?? center(root.querySelector(mine ? '#fMeLands' : '#fOppLands')) ?? stage;
       } else if (event.type === 'resolved') {
         from = stage;
         const targetId = event.targets?.players?.[0];
@@ -144,7 +145,7 @@ export function createMotion(root: HTMLElement): Motion {
         to = target ?? center(targetId !== undefined ? root.querySelector(`.avatar[data-pid="${targetId}"]`) : targetCard !== undefined ? root.querySelector(`.field [data-fid="${targetCard}"]`) : null) ?? stage;
       } else if (event.type === 'left' || event.type === 'countered') {
         from = event.type === 'countered' ? stage : old ?? target ?? stage;
-        to = center(root.querySelector(mine ? '#fMePiles .gy' : '#fOppPiles .gy')) ?? stage;
+        to = center(seat?.querySelector('.piles .gy')) ?? center(root.querySelector(mine ? '#fMePiles .gy' : '#fOppPiles .gy')) ?? stage;
       }
       // Keep large cards readable while travelling, independent of a tiny hand or pile's dimensions.
       const end = { ...to, w: stage.w, h: stage.h };

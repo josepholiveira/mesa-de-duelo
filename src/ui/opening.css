@@ -36,9 +36,9 @@
 .forge[data-opening] .action .prompt:empty { display: none; }
 .forge[data-opening] .action .btns { flex-direction: row; justify-content: center; gap: 14px; width: min(430px, 100%); }
 .forge[data-opening] .action .arena-btn { min-height: 48px; padding: 12px 24px; font: 600 16px/1.25 var(--body); letter-spacing: 0; }
-.forge[data-opening='play-draw'] .opening-copy { top: 30%; }
-.forge[data-opening='play-draw'] .action { top: 51%; bottom: auto; }
-.forge[data-opening='play-draw'] .hand { visibility: hidden; }
+.forge[data-opening='starting-player'] .opening-copy, .forge[data-opening='play-draw'] .opening-copy { top: 30%; }
+.forge[data-opening='starting-player'] .action, .forge[data-opening='play-draw'] .action { top: 51%; bottom: auto; }
+.forge[data-opening='starting-player'] .hand, .forge[data-opening='play-draw'] .hand { visibility: hidden; }
 @media (hover: hover) and (pointer: fine) {
   .forge[data-opening] .hand .hcard:hover, .forge[data-opening] .hand:not(.crowded) .hcard:hover { transform: translateY(-10%) scale(1.22); }
 }
@@ -53,3 +53,6 @@
 @media (prefers-reduced-motion: reduce) {
   .forge[data-opening] .hand .hcard { transition: none; }
 }
+
+.forge[data-opening='starting-player'] .action .btns { width: min(600px, 100%); flex-wrap: wrap; }
+.forge[data-opening='starting-player'] .action .arena-btn { flex: 0 1 auto; min-width: 110px; }

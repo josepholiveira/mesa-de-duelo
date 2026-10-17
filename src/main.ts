@@ -25,7 +25,7 @@ function show(name: keyof typeof screens) {
 
 let forge: ForgeClient | null = null;
 let forgeUrl = '';
-let lastMatch: [DeckData, DeckData | null, MatchConfig] | null = null;
+let lastMatch: [DeckData, DeckData | null, MatchConfig, (DeckData | null)[]?] | null = null;
 let connecting: Promise<ForgeClient | null> | null = null;
 let connectingUrl = '';
 let connectionAttempt = 0;
@@ -42,7 +42,7 @@ let screen: keyof typeof screens = 'lobby';
  * Partida no Forge em andamento (ou sala esperando o oponente): o que é preciso para redesenhar a mesa
  * e voltar ao mesmo assento se a conexão cair. code/token chegam da ponte em state.session.
  */
-interface ForgeMatch { url: string; deck: DeckData; opp?: DeckData; net: boolean; config?: MatchConfig; code?: string; token?: string }
+interface ForgeMatch { url: string; deck: DeckData; opp?: DeckData; opponents?: (DeckData | null)[]; net: boolean; config?: MatchConfig; code?: string; token?: string }
 let current: ForgeMatch | null = null;
 
 /** Guardada no localStorage para voltar à partida mesmo depois de recarregar a página ou fechar a aba. */
@@ -79,7 +79,7 @@ const forgeTable = createForgeTableView(document.querySelector('#scrGame')!, {
 mountRotateGate();
 
 const lobby = mountLobby(document.querySelector('#scrLobby')!, {
-  onPlay: async (you, opp, config) => { void enterLandscape(); await startMatch(you, opp, config); },
+  onPlay: async (you, opp, config, opponents) => { void enterLandscape(); await startMatch(you, opp, config, opponents); },
   onHost: async (you, name, url, config) => { void enterLandscape(); await startNetMatch(you, url, { type: 'host', name, deck: forgeDeck(you), config }, config); },
   onJoin: async (you, name, code, url) => { void enterLandscape(); await startNetMatch(you, url, { type: 'join', code, name, deck: forgeDeck(you) }); },
   onValidate: async (deck, format, url) => (await requireForge(url)).validateDeck(forgeDeck(deck), format),
@@ -94,11 +94,11 @@ const builder = mountDeckBuilder(document.querySelector('#scrDecks')!, {
   onChange: () => lobby.refresh(),
   validateDeck: async (deck, format) => {
     const result = await (await requireForge(FORGE_URL)).validateDeck(forgeDeck(deck), format);
-    return {...result, issues: result.issues.map(issue => ({...issue, section: issue.section === 'main' || issue.section === 'sideboard' ? issue.section : undefined}))};
+    return {...result, issues: result.issues.map(issue => ({...issue, section: issue.section === 'main' || issue.section === 'sideboard' || issue.section === 'commander' ? issue.section : undefined}))};
   },
 });
 
-const forgeDeck = (d: DeckData) => ({ name: d.name, cards: d.cards, sideboard: d.sideboard ?? [] });
+const forgeDeck = (d: DeckData) => ({ name: d.name, cards: d.cards, sideboard: d.sideboard ?? [], commanders: d.commanders ?? [] });
 async function requireForge(url: string): Promise<ForgeClient> {
   const client = await connectForge(url, null);
   if (!client) throw new Error('Não foi possível conectar ao servidor de jogo. Confira a conexão e tente novamente.');
@@ -157,7 +157,7 @@ async function openForge(url: string, hint: string | null, attempt: number): Pro
   client.onRoom = r => {
     if (current?.net && !r.started) {
       current.code = r.code; current.token = r.token; current.config = r.config;
-      saveResume(); lobby.showRoom(r.code); lobby.setStatus(''); finishStart();
+      saveResume(); lobby.showRoom(r); lobby.setStatus(''); finishStart();
     }
   };
   client.onValidation = (validation, target) => {
@@ -194,7 +194,7 @@ async function openForge(url: string, hint: string | null, attempt: number): Pro
 }
 
 function enterForgeTable(client: ForgeClient, m: ForgeMatch) {
-  forgeTable.attach(client, [deckArt(m.deck), m.opp && deckArt(m.opp)]);
+  forgeTable.attach(client, [deckArt(m.deck), ...(m.opponents ?? [m.opp ?? null]).map(d => d ? deckArt(d) : undefined)]);
   lobby.setStatus('');
   lobby.showRoom(null);
   show('game');
@@ -213,11 +213,11 @@ async function requestMatch(client: ForgeClient, match: ForgeMatch, message: Cli
     client.send(message);
   });
 }
-async function startMatch(you: DeckData, opp: DeckData | null, config: MatchConfig) {
+async function startMatch(you: DeckData, opp: DeckData | null, config: MatchConfig, opponents?: (DeckData | null)[]) {
   const client = await requireForge(FORGE_URL);
-  lastMatch = [you, opp, config];
+  lastMatch = [you, opp, config, opponents];
   lobby.setStatus('Preparando a mesa…');
-  await requestMatch(client, {url: FORGE_URL, deck: you, opp: opp ?? undefined, config, net: false}, {type: 'start', you: forgeDeck(you), opponent: opp ? forgeDeck(opp) : null, config});
+  await requestMatch(client, {url: FORGE_URL, deck: you, opp: opp ?? undefined, opponents, config, net: false}, {type: 'start', you: forgeDeck(you), opponent: opp ? forgeDeck(opp) : null, ...(opponents ? { opponents: opponents.map(d => d ? forgeDeck(d) : null) } : {}), config});
 }
 async function startNetMatch(you: DeckData, url: string, message: ClientMessage, config?: MatchConfig) {
   const client = await requireForge(url);

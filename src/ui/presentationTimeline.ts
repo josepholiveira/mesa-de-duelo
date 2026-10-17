@@ -114,7 +114,7 @@ export class PresentationTimeline {
 /** A real decision always wins over visual playback, including targeting, mana payment and questions. */
 export function hasLiveDecision(state: FState) {
   return !!(state.gameOver || state.sideboarding || state.question || state.input.ok.enabled || state.input.cancel.enabled ||
-    state.input.paying || state.input.targeting || state.input.blocking || state.input.suspendCast || state.input.selection || state.input.selectable.length || state.input.selectableStacks?.length || state.input.selectablePlayers?.length || state.input.actionable?.length || state.castable?.length);
+    state.input.paying || state.input.targeting || state.input.attacking || state.input.blocking || state.input.suspendCast || state.input.selection || state.input.selectable.length || state.input.selectableStacks?.length || state.input.selectablePlayers?.length || state.input.actionable?.length || state.castable?.length);
 }
 export function stateWithFrame(state: FState, frame: PresentationFrame | null): FState {
   if (!frame || hasLiveDecision(state)) return state;

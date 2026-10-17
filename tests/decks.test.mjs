@@ -102,7 +102,8 @@ test('export/import roundtrip keeps main, sideboard, split names and counts', ()
 test('parser reports malformed counts and excluded sections rather than dropping silently', () => {
   const parsed = decks.parseDeckList('Deck\n0 Lightning Bolt\n-1 Forest\n1.5 Island\n9007199254740992 Swamp\n4 Mountain\nMaybeboard\n2 Duress\nCommander\n1 Atraxa, Praetors\' Voice');
   assert.equal(parsed.skipped.length, 4);
-  assert.equal(parsed.ignored.length, 2);
+  assert.equal(parsed.ignored.length, 1);
+  assert.deepEqual(parsed.commanders, [{ name: "Atraxa, Praetors' Voice", count: 1 }]);
   assert.deepEqual(parsed.main, [{ name: 'Mountain', count: 4 }]);
   assert.deepEqual(parsed.sideboard, []);
 });
@@ -239,4 +240,51 @@ test('fresh Create snapshots equal normalized storage; actual external changes a
   assert.equal(deckImportSnapshot(fresh), deckImportSnapshot(loaded));
   assert.notEqual(deckImportSnapshot(fresh), deckImportSnapshot({ ...loaded, name: 'Changed elsewhere' }));
   assert.notEqual(deckImportSnapshot(fresh), deckImportSnapshot({ ...loaded, cards: [{ name: 'Forest', count: 1 }] }));
+});
+
+
+test('Commander imports, exports, merges, and storage preserve a separate command zone', () => {
+  const commander = { ...example, format: 'commander', cards: [{ name: 'Forest', count: 99 }], sideboard: [], commanders: [{ name: 'Elvish Archdruid', count: 1 }] };
+  const parsed = decks.parseDeckList(decks.exportDeckList(commander));
+  assert.deepEqual(parsed.commanders, commander.commanders);
+  assert.equal(decks.deckSize(commander), 99); assert.equal(decks.totalDeckSize(commander), 100);
+  const target = { ...commander, commanders: [{ name: 'Old Commander', count: 1 }] };
+  assert.deepEqual(applyDeckImport(target, commander, 'replace').commanders, commander.commanders);
+  assert.equal(applyDeckImport(target, commander, 'merge').commanders.length, 2);
+  assert.equal(target.commanders[0].name, 'Old Commander');
+  const store = storage(); assert.equal(decks.writeDeckLibrary(store, [commander]).ok, true);
+  assert.deepEqual(decks.readDeckLibrary(store).decks[0].commanders, commander.commanders);
+});
+
+test('Commander local rules enforce 100 total, singleton exceptions, identity including lands, and sideboard', () => {
+  cache('Commander Test', { type_line: 'Legendary Creature — Elf', color_identity: ['G'], legalities: { commander: 'legal' } });
+  cache('Commander Forest', { type_line: 'Basic Land — Forest', color_identity: ['G'], legalities: { commander: 'legal' } });
+  cache('Commander Island', { type_line: 'Basic Land — Island', color_identity: ['U'], legalities: { commander: 'legal' } });
+  cache('Commander Bolt', { color_identity: ['G'], legalities: { commander: 'legal' } });
+  const d = { id: 'c', name: 'c', format: 'commander', commanders: [{ name: 'Commander Test', count: 1 }], cards: [{ name: 'Commander Forest', count: 99 }], sideboard: [] };
+  assert.equal(validateDeckLocal(d).status, 'unknown'); // Partnerships/eligibility require the server.
+  assert.ok(validateDeckLocal({ ...d, cards: [{ name: 'Commander Forest', count: 98 }] }).issues.some(i => i.code === 'total_count'));
+  assert.ok(validateDeckLocal({ ...d, cards: [{ name: 'Commander Island', count: 99 }] }).issues.some(i => i.code === 'color_identity'));
+  assert.ok(validateDeckLocal({ ...d, cards: [{ name: 'Commander Forest', count: 97 }, { name: 'Commander Bolt', count: 2 }] }).issues.some(i => i.code === 'copies'));
+  assert.ok(validateDeckLocal({ ...d, sideboard: [{ name: 'Commander Forest', count: 1 }] }).issues.some(i => i.code === 'sideboard_count'));
+  assert.equal(cardCopyLimit('Commander Bolt', undefined, 'commander'), 1);
+  assert.equal(cardCopyLimit('Test Dwarves', cache('Test Dwarves', { oracle_text: 'A deck can have up to seven cards named Test Dwarves.' }), 'commander'), 7);
+  for (const deck of decks.DEFAULT_DECKS.filter(d => d.format === 'commander')) assert.equal(decks.totalDeckSize(deck), 100);
+  assert.equal(decks.DEFAULT_DECKS.filter(d => d.format === 'commander').length, 4);
+});
+
+
+test('Commander tags preserve command designation and do not infer a sideboard from blank lines', () => {
+  for (const marker of ['*CMDR*', '[Commander]']) {
+    for (const separator of ['\n', '\n\n']) {
+      const parsed = decks.parseDeckList(`1 Marwyn, the Nurturer (DOM) 172 ${marker}${separator}99 Forest`);
+      assert.deepEqual(parsed.commanders, [{ name: 'Marwyn, the Nurturer', count: 1 }]);
+      assert.deepEqual(parsed.main, [{ name: 'Forest', count: 99 }]);
+      assert.deepEqual(parsed.sideboard, []);
+      assert.deepEqual(parsed.skipped, []);
+      assert.deepEqual(parsed.ignored, []);
+    }
+  }
+  const explicit = decks.parseDeckList('1 Marwyn, the Nurturer [Commander]\n\n99 Forest\nSB: 1 Island');
+  assert.deepEqual(explicit.sideboard, [{ name: 'Island', count: 1 }]);
 });

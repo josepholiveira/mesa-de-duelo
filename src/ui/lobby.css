@@ -10,6 +10,7 @@
 .match-choice legend { font-weight: 600; font-size: 14px; padding: 0; margin-bottom: 6px; color: #d8dfec; }
 .choice-segments { display: flex; padding: 4px; gap: 3px; border-radius: 10px; background: #070e1bb3; box-shadow: inset 0 0 0 1px #ffffff10; }
 .choice-segments button { flex: 1; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 8px 10px; min-height: 40px; font-size: 14px; white-space: nowrap; }
+.format-choice .choice-segments button { padding-inline: 7px; font-size: 13px; }
 .choice-segments button[aria-pressed=true] { color: var(--gold-light); border-color: #f2b54c55; background: linear-gradient(#3b332599, #2b281f99); box-shadow: 0 2px 4px #0003; }
 .choice-segments button:disabled, .opponent-card:disabled { cursor: default; opacity: .55; }
 .setup-explanation { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
@@ -22,6 +23,10 @@
 .opponent-choice { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; font-size: 14px; color: #d8dfec; }
 .opponent-choice label { font-weight: 600; }
 .opponent-choice .input-field { margin: 0; width: 100%; min-height: 44px; font-size: 14px; padding: 9px 11px; }
+.commander-ai-panel { display: grid; gap: 10px; margin-bottom: 16px; min-width: 0; }
+.commander-ai-panel .opponent-choice { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; margin: 0; font-size: 13px; }
+.commander-ai-heading { margin: 0; color: #d8dfec; font-size: 14px; font-weight: 600; }
+.computer-seat-number { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid #f2b54c44; border-radius: 50%; color: var(--gold-light); font-size: 12px; font-variant-numeric: tabular-nums; }
 .match-ready { background: linear-gradient(155deg, #1a2940cc, #070d19e6 72%); border-radius: 12px; padding: 14px; box-shadow: inset 0 0 0 1px #ffffff0d, inset 0 1px 0 #ffffff12, 0 8px 24px #0002; }
 .match-ready:has(.arena-btn:not(:disabled)) { box-shadow: inset 0 0 0 1px #f2b54c33, inset 0 1px 0 #ffe2a04d, 0 8px 24px #0003; }
 .chosen-deck { position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; margin-bottom: 12px; }
@@ -91,6 +96,15 @@
 .room-info { padding: 12px; border-left: 2px solid var(--gold); background: #f2b54c08; font-size: 13px; }
 .room-info p { margin: 0 0 8px; }
 .room-info .ghost-btn { padding: 8px 0; font-size: 13px; white-space: normal; }
+.room-seats { padding: 0; margin: 16px 0; list-style: none; display: grid; gap: 6px; }
+.room-seats li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; padding: 8px 10px; border: 1px dashed #ffffff24; border-radius: 8px; font-size: 13px; color: var(--muted); }
+.room-seats li.occupied { border-style: solid; border-color: #f2b54c40; background: #f2b54c08; color: var(--ink); }
+.room-seats li > span { min-width: 0; overflow-wrap: anywhere; }
+.room-seats small { font-size: 11px; white-space: nowrap; color: var(--muted); }
+.waiting-room > .match-choice, .waiting-room .network-setup > :not(#netWait), .waiting-room #startMatch { display: none; }
+.waiting-room .net-wait { margin: 0; }
+.waiting-room .chosen-deck { margin-bottom: 0; }
+.room-invitation { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 @media (max-width: 1050px) {
   .play-layout { grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; }
   .match-sidebar { padding-left: 22px; }
@@ -105,6 +119,7 @@
   .play-layout { display: flex; flex-direction: column; gap: 28px; }
   .match-sidebar { position: static; width: 100%; border-left: 0; padding: 0 0 24px; border-bottom: 1px solid #ffffff14; display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
   .match-choice { margin-bottom: 16px; }
+  .format-choice, .player-count-choice, .duration-choice, .commander-ai-panel { grid-column: 1/-1; }
   .match-choice:has(.opponent-cards) { grid-column: 1/-1; grid-row: 2; }
   .opponent-cards { grid-template-columns: 1fr 1fr; }
   .opponent-card { padding: 10px 8px; gap: 8px; }

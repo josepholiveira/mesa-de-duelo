@@ -215,8 +215,8 @@ export async function fetchByNames(names: string[], refreshLegality = false): Pr
   return out;
 }
 
-export async function searchCards(q: string, page = 1, format?: 'free' | 'pauper'): Promise<{ cards: ScryCard[]; hasMore: boolean; total: number }> {
-  if (format === 'pauper') q = `(${q}) f:pauper`;
+export async function searchCards(q: string, page = 1, format?: 'free' | 'pauper' | 'commander'): Promise<{ cards: ScryCard[]; hasMore: boolean; total: number }> {
+  if (format === 'pauper' || format === 'commander') q = `(${q}) f:${format}`;
   // Multilíngue para aceitar também o nome em português ("Golpe Relampejante").
   const { status, json } = await request(`/cards/search?q=${encodeURIComponent(q)}&unique=cards&order=name&include_multilingual=true&page=${page}`);
   if (status === 404) return { cards: [], hasMore: false, total: 0 };

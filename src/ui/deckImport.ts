@@ -27,13 +27,14 @@ function combine(entries: DeckEntry[]): DeckEntry[] {
 export function applyDeckImport(target: DeckData, incoming: DeckData, mode: DeckImportMode): DeckData {
   if (target.builtin) throw new Error('Crie uma cópia deste deck pronto antes de importar cartas.');
   if (mode !== 'merge' && mode !== 'replace') throw new Error('Escolha como aplicar a lista.');
-  if (!incoming.cards.length && !incoming.sideboard?.length) throw new Error('A lista não contém cartas para importar.');
+  if (!incoming.cards.length && !incoming.sideboard?.length && !incoming.commanders?.length) throw new Error('A lista não contém cartas para importar.');
   const cards = combine([...(mode === 'merge' ? target.cards : []), ...incoming.cards]);
   const sideboard = combine([...(mode === 'merge' ? target.sideboard ?? [] : []), ...(incoming.sideboard ?? [])]);
+  const commanders = combine([...(mode === 'merge' ? target.commanders ?? [] : []), ...(incoming.commanders ?? [])]);
   const unresolved = [...new Set([...(mode === 'merge' ? target.unresolved ?? [] : []), ...(incoming.unresolved ?? [])])]
-    .filter(name => [...cards, ...sideboard].some(entry => entry.name.toLowerCase() === name.toLowerCase()));
+    .filter(name => [...cards, ...sideboard, ...commanders].some(entry => entry.name.toLowerCase() === name.toLowerCase()));
   return {
-    ...target, cards, sideboard, unresolved,
+    ...target, cards, sideboard, commanders, unresolved,
     importHistory: [...new Set([...(target.importHistory ?? []), ...(target.importSource ? [target.importSource] : [])])],
     importSource: incoming.importSource ?? target.importSource,
     updatedAt: new Date().toISOString(),

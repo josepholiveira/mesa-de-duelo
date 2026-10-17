@@ -27,14 +27,15 @@ final class Decks {
     }
 
     static Deck build(String id) {
-        var result = DeckValidation.validate(template(id), "free");
+        JsonObject source = template(id);
+        var result = DeckValidation.validate(source, source != null && source.has("format") ? source.get("format").getAsString() : "free");
         if (!result.valid()) throw new IllegalArgumentException("Deck pronto inválido: " + id);
         return result.deck();
     }
 
     static Deck random(String format) {
         var valid = LISTS.values().stream()
-            .filter(o -> !"pauper".equals(format) || "pauper".equals(o.has("format") ? o.get("format").getAsString() : "free"))
+            .filter(o -> "free".equals(format) ? !"commander".equals(o.has("format") ? o.get("format").getAsString() : "free") : format.equals(o.has("format") ? o.get("format").getAsString() : "free"))
             .map(o -> DeckValidation.validateForAi(o, format)).filter(DeckValidation.Result::valid).toList();
         if (valid.isEmpty()) throw new IllegalArgumentException("Não há deck pronto válido para este formato.");
         return valid.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(valid.size())).deck();

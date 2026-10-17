@@ -6,6 +6,22 @@ Todas as mudanças que você sente na mesa. As versões seguem o formato **X.Y.Z
 - **Y** muda quando chegam coisas novas: decks, telas, regras, recursos.
 - **Z** muda só com correções.
 
+## [0.8.0] - 2026-10-16
+
+### Novo
+
+- **Commander para 2, 3 ou 4 jogadores**, contra computadores ou com outras pessoas em uma sala. Escolha a quantidade de jogadores antes de iniciar; cada computador pode usar um deck diferente.
+- Partidas de Commander começam com **40 pontos de vida**, com zona de comando, custo adicional para conjurar novamente o comandante e registro de dano de combate por comandante. Uma eliminação mantém os demais jogadores na mesa; o último sobrevivente vence.
+- O editor de Commander destaca o comandante em uma área própria, separado das outras cartas. A seleção, a troca e as parcerias válidas têm controles próprios; a importação e a exportação preservam essa separação.
+- Validação de **100 cartas no total**, identidade de cor, limite de uma cópia, exceções do texto Oracle, comandantes, parcerias e legalidade. Decks incompletos podem ser salvos como rascunhos.
+- Quatro decks prontos de Commander: **Triunfo das Fichas**, **Destruição Dracônica**, **Perigo no Cemitério** e **Primeiro Voo**.
+
+### Mudou
+
+- A mesa mostra todos os oponentes, com vida em destaque, permanentes e zona de comando de cada um. Os campos usam toda a largura disponível e mantêm o tamanho quando a pilha ou uma janela aparece por cima. Fileiras cheias têm rolagem horizontal e controles nas bordas; a pilha flutua à direita, com cartas grandes, opção de recolher e galeria central.
+- No combate com vários defensores possíveis, escolha a criatura atacante e depois o jogador ou planeswalker que ela vai atacar. Quando há apenas um defensor possível, um clique continua sendo suficiente.
+- Salas de Commander mostram os assentos ocupados e as vagas; a partida começa quando todos entram. Reconectar preserva o assento, e jogadores eliminados podem acompanhar o restante da partida sem revelar mãos ocultas.
+
 ## [0.7.0] - 2026-10-16
 
 ### Novo

@@ -41,7 +41,7 @@ public class BridgeRulesTest {
     }
     @Test public void sharedStartersArePlayableInTheirFormat() {
         Decks.LISTS.forEach((id, template) -> {
-            String format = id.startsWith("pauper-") ? "pauper" : "free";
+            String format = template.has("format") ? template.get("format").getAsString() : "free";
             var result = DeckValidation.validate(new JsonPrimitive(id), format);
             assertTrue(id + ": " + result.json(), result.valid());
         });

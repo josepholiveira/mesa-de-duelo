@@ -1,5 +1,5 @@
 import './decks.css';
-import { countEntries, deckEntries, deckSize, type DeckData } from '../decks';
+import { countEntries, deckEntries, totalDeckSize, type DeckData } from '../decks';
 import { cardInfo } from '../cards';
 import { cacheGet, fetchByNames } from '../scryfall';
 import { esc, manaHTML, pip, richText } from './cardtext';
@@ -21,7 +21,7 @@ export function openDeckPreview(deck: DeckData, opts: DeckPreviewOptions) {
   dlg.className = 'deck-preview dw-preview'; dlg.setAttribute('aria-label', `Deck ${deck.name}`);
   const art = deckArt(deck);
   let inspected: string | undefined;
-  dlg.innerHTML = `<header class="dp-head"><div class="dw-preview-heading">${art ? `<img src="${esc(art)}" alt="">` : ''}<div><h2>${esc(deck.name)}</h2><p>${deckColors(deck).map(pip).join('')}<span>${deckSize(deck)} cartas · ${countEntries(deck.sideboard ?? [])} no sideboard · ${deck.builtin ? 'Deck pronto' : 'Seu deck'}</span></p></div></div><button type="button" class="dp-close" data-close aria-label="Fechar visualização do deck">×</button></header><div class="dp-main"><div class="dp-body"></div><aside class="dw-preview-card" aria-label="Carta em destaque"><div id="dpCard"></div></aside></div><footer class="dp-foot">${opts.onCopy ? '<button type="button" class="dw-button" data-copy>Criar uma cópia</button>' : ''}${opts.onEdit ? '<button type="button" class="dw-button" data-edit>Editar deck</button>' : ''}<button type="button" class="dw-button" data-close>Fechar</button><button type="button" class="dw-button primary" data-pick ${opts.selected ? 'disabled' : ''}>${opts.selected ? 'Deck escolhido' : esc(opts.pickLabel ?? 'Escolher este deck')}</button></footer>`;
+  dlg.innerHTML = `<header class="dp-head"><div class="dw-preview-heading">${art ? `<img src="${esc(art)}" alt="">` : ''}<div><h2>${esc(deck.name)}</h2><p>${deckColors(deck).map(pip).join('')}<span>${totalDeckSize(deck)} cartas · ${countEntries(deck.sideboard ?? [])} no sideboard · ${deck.builtin ? 'Deck pronto' : 'Seu deck'}</span></p></div></div><button type="button" class="dp-close" data-close aria-label="Fechar visualização do deck">×</button></header><div class="dp-main"><div class="dp-body"></div><aside class="dw-preview-card" aria-label="Carta em destaque"><div id="dpCard"></div></aside></div><footer class="dp-foot">${opts.onCopy ? '<button type="button" class="dw-button" data-copy>Criar uma cópia</button>' : ''}${opts.onEdit ? '<button type="button" class="dw-button" data-edit>Editar deck</button>' : ''}<button type="button" class="dw-button" data-close>Fechar</button><button type="button" class="dw-button primary" data-pick ${opts.selected ? 'disabled' : ''}>${opts.selected ? 'Deck escolhido' : esc(opts.pickLabel ?? 'Escolher este deck')}</button></footer>`;
   document.body.append(dlg);
 
   function show(name?: string) {
@@ -34,7 +34,7 @@ export function openDeckPreview(deck: DeckData, opts: DeckPreviewOptions) {
     return groupedRows(entries).map(g => `<section class="dp-group"><h3>${sideboard ? 'Sideboard · ' : ''}${g.label} <small>${countEntries(g.rows)}</small></h3><ul>${g.rows.map(row => `<li><button type="button" class="dp-card" data-card="${esc(row.name)}" aria-label="Ler ${esc(row.info?.label ?? row.name)}, ${row.count} ${row.count === 1 ? 'cópia' : 'cópias'}"><span class="dp-n">${row.count}</span><span class="dp-name">${esc(row.info?.label ?? row.name)}</span><span class="dp-cost">${row.info ? manaHTML(row.info.manaCost) : ''}</span></button></li>`).join('')}</ul></section>`).join('');
   }
   function render() {
-    dlg.querySelector('.dp-body')!.innerHTML = `${statsHTML(deck)}<div class="dp-list">${group(deck.cards)}</div>${deck.sideboard?.length ? `<details class="dw-preview-side"><summary>Sideboard <b>${countEntries(deck.sideboard)}</b></summary><div class="dp-list">${group(deck.sideboard, true)}</div></details>` : ''}`;
+    dlg.querySelector('.dp-body')!.innerHTML = `${deck.commanders?.length ? `<section class="dp-group"><h3>Comandantes</h3>${group(deck.commanders)}</section>` : ''}${statsHTML(deck)}<div class="dp-list">${group(deck.cards)}</div>${deck.sideboard?.length ? `<details class="dw-preview-side"><summary>Sideboard <b>${countEntries(deck.sideboard)}</b></summary><div class="dp-list">${group(deck.sideboard, true)}</div></details>` : ''}`;
     show(inspected ?? deck.cards.find(e => cacheGet(e.name))?.name);
   }
   render();

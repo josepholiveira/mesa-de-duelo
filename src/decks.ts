@@ -1,12 +1,13 @@
 import starterDecks from '../shared/starter-decks.json' with { type: 'json' };
 
-export type DeckFormat = 'free' | 'pauper';
+export type DeckFormat = 'free' | 'pauper' | 'commander';
 export interface DeckEntry { name: string; count: number; oracleId?: string }
 export interface DeckData {
   id: string;
   name: string;
   cards: DeckEntry[];
   sideboard?: DeckEntry[];
+  commanders?: DeckEntry[];
   builtin?: boolean;
   format?: DeckFormat;
   updatedAt?: string;
@@ -20,7 +21,8 @@ const BASICS = new Set(['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wast
 export const isBasic = (name: string) => BASICS.has(name.toLowerCase());
 export const countEntries = (entries: DeckEntry[]) => entries.reduce((s, e) => s + e.count, 0);
 export const deckSize = (d: DeckData) => countEntries(d.cards);
-export const deckEntries = (d: DeckData) => [...d.cards, ...(d.sideboard ?? [])];
+export const totalDeckSize = (d: DeckData) => deckSize(d) + countEntries(d.commanders ?? []);
+export const deckEntries = (d: DeckData) => [...d.cards, ...(d.sideboard ?? []), ...(d.commanders ?? [])];
 export const allDecks = (): DeckData[] => [...loadUserDecks(), ...DEFAULT_DECKS];
 
 export const DECK_STORAGE_KEY = 'mesa:decks:v2';
@@ -38,7 +40,8 @@ function validEntries(v: unknown): v is DeckEntry[] {
 }
 function validDeck(v: unknown): v is DeckData {
   return object(v) && typeof v.id === 'string' && !!v.id && typeof v.name === 'string' && validEntries(v.cards)
-    && (v.sideboard === undefined || validEntries(v.sideboard)) && (v.format === undefined || v.format === 'free' || v.format === 'pauper')
+    && (v.sideboard === undefined || validEntries(v.sideboard)) && (v.format === undefined || v.format === 'free' || v.format === 'pauper' || v.format === 'commander')
+    && (v.commanders === undefined || validEntries(v.commanders))
     && (v.unresolved === undefined || (Array.isArray(v.unresolved) && v.unresolved.every(n => typeof n === 'string')));
 }
 
@@ -116,7 +119,7 @@ export function saveUserDecks(decks: DeckData[]): SaveResult {
   return result;
 }
 
-export interface ParsedList { main: DeckEntry[]; sideboard: DeckEntry[]; skipped: string[]; ignored: string[] }
+export interface ParsedList { main: DeckEntry[]; sideboard: DeckEntry[]; commanders: DeckEntry[]; skipped: string[]; ignored: string[] }
 const SECTION = /^(deck|main ?deck|mainboard|commanders?|companions?|sideboard|maybeboard|considering|tokens?)$/i;
 
 /** Preserve sideboards and reject malformed quantities instead of quietly shortening a deck. */
@@ -126,34 +129,37 @@ export function parseDeckList(text: string): ParsedList {
     const h = line.replace(/^\/\/\s*/, '').replace(/\s*\(\d+\)\s*$/, '').replace(/:\s*$/, '').trim();
     return SECTION.test(h) ? h.toLowerCase() : null;
   };
+  const commanderMarker = /\[[^\]]*\bcommander\b[^\]]*\]|\*CMDR\*/i;
   const hasHeaders = lines.some(l => sectionOf(l));
-  const main = new Map<string, DeckEntry>(), sideboard = new Map<string, DeckEntry>();
+  const hasCommanderTags = lines.some(l => commanderMarker.test(l));
+  const main = new Map<string, DeckEntry>(), sideboard = new Map<string, DeckEntry>(), commanders = new Map<string, DeckEntry>();
   const skipped: string[] = [], ignored: string[] = [];
-  let section: 'main' | 'sideboard' | 'ignored' = 'main';
+  let section: 'main' | 'sideboard' | 'commanders' | 'ignored' = 'main';
   let seenCard = false;
   for (const raw of lines) {
-    if (!raw) { if (!hasHeaders && seenCard) section = 'sideboard'; continue; }
+    if (!raw) { if (!hasHeaders && !hasCommanderTags && seenCard) section = 'sideboard'; continue; }
     const header = sectionOf(raw);
-    if (header) { section = /^(deck|main)/.test(header) ? 'main' : header === 'sideboard' ? 'sideboard' : 'ignored'; continue; }
+    if (header) { section = /^(deck|main)/.test(header) ? 'main' : header === 'sideboard' ? 'sideboard' : /^commander/.test(header) ? 'commanders' : 'ignored'; continue; }
     if (/^(\/\/|#)/.test(raw) || /^(about|name)\s/i.test(raw)) continue;
     const sb = /^SB:\s*/i.test(raw);
     const line = raw.replace(/^SB:\s*/i, '');
     const m = line.match(/^(?:(\d+)\s*x?\s+)?(.+)$/i);
     if (!m || (!m[1] && /^[+\-\d]/.test(line) && /^[+\-]?\d*(?:[.,]\d+|\s*x?\s)/i.test(line))) { skipped.push(raw); continue; }
     const count = m[1] ? Number(m[1]) : 1;
-    const tag = /\[[^\]]*\b(sideboard|maybeboard|considering|tokens?)\b[^\]]*\]/i.exec(m[2]);
+    const tag = /\[[^\]]*\b(sideboard|commander|maybeboard|considering|tokens?)\b[^\]]*\]/i.exec(m[2]);
+    const isCommander = commanderMarker.test(m[2]);
     const name = m[2].replace(/\s*\^[^^]*\^/g, '').replace(/\s*\[[^\]]*\]/g, '').replace(/\s*\*[A-Z]+\*/g, '')
       .replace(/\s+\([A-Za-z0-9]{2,6}\)(\s+[\w★-]+)?\s*$/, '').replace(/\s*\/\/\s*/g, ' // ').trim();
     if (!name || !Number.isSafeInteger(count) || count <= 0) { skipped.push(raw); continue; }
     seenCard = true;
-    if ((!sb && section === 'ignored') || (tag && tag[1].toLowerCase() !== 'sideboard')) { ignored.push(raw); continue; }
-    const pool = sb || section === 'sideboard' || tag ? sideboard : main;
+    if ((!sb && section === 'ignored') || (tag && !['sideboard', 'commander'].includes(tag[1].toLowerCase()))) { ignored.push(raw); continue; }
+    const pool = sb || section === 'sideboard' || tag?.[1].toLowerCase() === 'sideboard' ? sideboard : section === 'commanders' || isCommander ? commanders : main;
     const key = name.toLowerCase(), previous = pool.get(key);
     if (previous && !Number.isSafeInteger(previous.count + count)) { skipped.push(raw); continue; }
     if (previous) previous.count += count; else pool.set(key, { name, count });
   }
-  return { main: [...main.values()], sideboard: [...sideboard.values()], skipped, ignored };
+  return { main: [...main.values()], sideboard: [...sideboard.values()], commanders: [...commanders.values()], skipped, ignored };
 }
 export function exportDeckList(deck: DeckData): string {
-  return `Deck\n${deck.cards.map(e => `${e.count} ${e.name}`).join('\n')}${deck.sideboard?.length ? `\n\nSideboard\n${deck.sideboard.map(e => `${e.count} ${e.name}`).join('\n')}` : ''}\n`;
+  return `${deck.commanders?.length ? `Commander\n${deck.commanders.map(e => `${e.count} ${e.name}`).join('\n')}\n\n` : ''}Deck\n${deck.cards.map(e => `${e.count} ${e.name}`).join('\n')}${deck.sideboard?.length ? `\n\nSideboard\n${deck.sideboard.map(e => `${e.count} ${e.name}`).join('\n')}` : ''}\n`;
 }

@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import forge.game.ability.ApiType;
+import forge.game.GameEntity;
 import forge.game.card.Card;
 import forge.game.card.CardView;
 import forge.game.combat.Combat;
@@ -13,6 +14,7 @@ import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
 import forge.game.zone.ZoneType;
 import forge.gamemodes.match.input.InputBlock;
+import forge.gamemodes.match.input.InputAttack;
 import forge.gamemodes.match.input.InputConfirm;
 import forge.gamemodes.match.input.InputSelectEntitiesFromList;
 import forge.gamemodes.match.input.InputSelectManyBase;
@@ -20,6 +22,8 @@ import forge.gamemodes.match.input.InputSelectManyBase;
 /** Typed context for the pinned Forge inputs whose public API omits their selection state. */
 final class InputContext {
     private InputContext() { }
+    private static final Field ATTACK_COMBAT = field(InputAttack.class, "combat");
+    private static final Field ATTACK_PLAYER = field(InputAttack.class, "playerAttacks");
     private static final Field ATTACKER = field(InputBlock.class, "currentAttacker");
     private static final Field COMBAT = field(InputBlock.class, "combat");
     private static final Field DEFENDER = field(InputBlock.class, "defender");
@@ -56,6 +60,55 @@ final class InputContext {
         result.addProperty("min", (Integer) value(SELECT_MIN, input));
         result.addProperty("max", (Integer) value(SELECT_MAX, input));
         return result;
+    }
+
+    static java.util.Set<Integer> playerChoices(Object input) {
+        if (!(input instanceof InputSelectEntitiesFromList<?> select)) return java.util.Set.of();
+        java.util.Set<Integer> players = new java.util.LinkedHashSet<>();
+        for (var choice : select.getValidChoices()) {
+            if (!(choice instanceof Player player)) return java.util.Set.of();
+            players.add(player.getId());
+        }
+        return players;
+    }
+
+    static JsonObject attacking(Object input) {
+        if (!(input instanceof InputAttack)) return null;
+        Combat combat = (Combat) value(ATTACK_COMBAT, input);
+        Player player = (Player) value(ATTACK_PLAYER, input);
+        JsonObject result = new JsonObject();
+        JsonArray attackers = new JsonArray(), defenders = new JsonArray(), assignments = new JsonArray();
+        for (GameEntity defender : combat.getDefenders()) defenders.add(defenderJson(defender));
+        for (Card attacker : player.getCreaturesInPlay()) {
+            JsonArray legal = new JsonArray();
+            for (GameEntity defender : combat.getDefenders())
+                if (combat.isAttacking(attacker, defender) || CombatUtil.canAttack(attacker, defender)) legal.add(defenderJson(defender));
+            if (!legal.isEmpty()) {
+                attackers.add(attacker.getId()); JsonObject row = new JsonObject();
+                row.addProperty("attacker", attacker.getId()); row.add("defenders", legal); assignments.add(row);
+            }
+        }
+        result.add("attackers", attackers); result.add("defenders", defenders); result.add("legalAssignments", assignments);
+        return result;
+    }
+
+    private static JsonObject defenderJson(GameEntity defender) {
+        JsonObject row = new JsonObject(); row.addProperty("id", defender.getId());
+        row.addProperty("kind", defender instanceof Player ? "player" : "card"); return row;
+    }
+
+    static boolean assignAttack(Object input, int attackerId, int defenderId, String kind) {
+        if (!(input instanceof InputAttack attack) || !("player".equals(kind) || "card".equals(kind))) return false;
+        Combat combat = (Combat) value(ATTACK_COMBAT, input);
+        Player player = (Player) value(ATTACK_PLAYER, input);
+        Card attacker = null; GameEntity defender = null;
+        for (Card card : player.getCreaturesInPlay()) if (card.getId() == attackerId) attacker = card;
+        for (GameEntity candidate : combat.getDefenders())
+            if (candidate.getId() == defenderId && (candidate instanceof Player) == "player".equals(kind)) defender = candidate;
+        if (attacker == null || defender == null || !(combat.isAttacking(attacker, defender) || CombatUtil.canAttack(attacker, defender))) return false;
+        if (defender instanceof Player target) attack.selectPlayer(target, null);
+        else if (!attack.selectCard((Card) defender, null, null)) return false;
+        return attack.selectCard(attacker, null, null);
     }
 
     static JsonObject blocking(Object input) {

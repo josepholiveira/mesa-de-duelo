@@ -57,7 +57,7 @@ import forge.util.FSerializableFunction;
 import io.netty.channel.Channel;
 
 /**
- * Uma partida controlada pelo navegador: um humano contra a IA, ou dois humanos numa sala em rede.
+ * Uma partida controlada pelo navegador: um humano contra a IA, ou de dois a quatro humanos numa sala em rede.
  * Cada humano ocupa um {@link Seat}, com a sua conexão, o seu prompt e as suas perguntas.
  *
  * Servidor → cliente: {type:"state", ..., you, input:{message, ok, cancel, selectable}, question, room?}
@@ -70,7 +70,7 @@ final class Session {
     final String code;
     private final boolean room;
     final Seat[] seats;
-    private final Deck aiDeck;
+    private final List<Deck> aiDecks;
     final MatchConfig config;
     private final AtomicLong stateVersion = new AtomicLong();
     private final VisibleEvents events = new VisibleEvents(this::markDirty, stateVersion::get);
@@ -86,23 +86,28 @@ final class Session {
     private record Question(int id, ProtocolMethod method, Object[] args, List<Object> options,
                             CompletableFuture<Object> answer, JsonObject json) { }
 
-    private Session(String code, boolean room, int humans, Deck aiDeck, MatchConfig config) {
+    private Session(String code, boolean room, int humans, List<Deck> aiDecks, MatchConfig config) {
         this.code = code;
         this.room = room;
-        this.aiDeck = aiDeck;
+        this.aiDecks = List.copyOf(aiDecks);
         this.config = config;
         seats = new Seat[humans];
         for (int i = 0; i < humans; i++) seats[i] = new Seat(i);
     }
 
     static Session solo(String code, Channel ch, Deck you, Deck opponent, MatchConfig config) {
-        Session s = new Session(code, false, 1, opponent, config);
+        return solo(code, ch, you, List.of(opponent), config);
+    }
+
+    static Session solo(String code, Channel ch, Deck you, List<Deck> opponents, MatchConfig config) {
+        if (opponents.size() != config.playerCount() - 1) throw new IllegalArgumentException("Quantidade de oponentes inválida.");
+        Session s = new Session(code, false, 1, opponents, config);
         s.seats[0].bind(ch, "Você", you);
         return s;
     }
 
     static Session room(String code, Channel host, String name, Deck deck, MatchConfig config) {
-        Session s = new Session(code, true, 2, null, config);
+        Session s = new Session(code, true, config.playerCount(), List.of(), config);
         s.seats[0].bind(host, name, deck);
         return s;
     }
@@ -139,18 +144,19 @@ final class Session {
         Set<String> names = new java.util.HashSet<>();
         for (Seat seat : seats) {
             seat.reset();
-            // O frontend reconhece o vencedor pelo nome, então os dois humanos precisam de nomes diferentes.
+            // O frontend reconhece o vencedor pelo nome, então os humanos precisam de nomes diferentes.
             String name = seat.name;
             for (int n = 2; !names.add(name); n++) name = seat.name + " (" + n + ")";
             seat.name = name;
             WebGuiGame g = new WebGuiGame(seat.new Remote(), () -> seat.autoPassNoActions);
             seat.gui = g;
-            RegisteredPlayer rp = new RegisteredPlayer(seat.deck).setPlayer(new LobbyPlayerHuman(name));
+            RegisteredPlayer rp = registered(seat.deck).setPlayer(new LobbyPlayerHuman(name));
             seat.registered = rp;
             players.add(rp);
             guis.put(rp, g);
         }
-        if (aiDeck != null) players.add(new RegisteredPlayer(aiDeck).setPlayer(GamePlayerUtil.createAiPlayer("Oponente")));
+        for (int i = 0; i < aiDecks.size(); i++)
+            players.add(registered(aiDecks.get(i)).setPlayer(GamePlayerUtil.createAiPlayer(aiDecks.size() == 1 ? "Oponente" : "Oponente " + (i + 1))));
         HostedMatch m = new HostedMatch();
         match = m;
         m.setEndGameHook(() -> ended(m));
@@ -158,6 +164,10 @@ final class Session {
         System.out.printf("Nova partida%s: %s%n", room ? " na sala " + code : "",
             String.join(" x ", players.stream().map(p -> p.getDeck().getName()).toList()));
         markDirty();
+    }
+
+    private RegisteredPlayer registered(Deck deck) {
+        return config.commander() ? RegisteredPlayer.forCommander(deck) : new RegisteredPlayer(deck);
     }
 
     boolean matchOver() {
@@ -210,7 +220,7 @@ final class Session {
             for (var outcome : m.getMatch().getOutcomes()) if (outcome.isDraw()) draws++;
         }
         for (Seat seat : seats) ready.add(seat.sideboardReady);
-        if (aiDeck != null) ready.add(true);
+        for (Deck ignored : aiDecks) ready.add(true);
         o.add("wins", wins); o.add("ready", ready); o.addProperty("draws", draws);
         return o;
     }
@@ -231,19 +241,22 @@ final class Session {
             seat.question = null;
             if (q != null) q.answer().complete(defaultAnswer(q));
         }
-        if (match != null && !gameOver()) {
-            for (Seat seat : seats) {
-                IGameController c = seat.controller();
-                if (c != null) { FThreads.invokeInEdtLater(c::concede); break; }
-            }
-        }
+        HostedMatch stopped = match;
+        if (stopped != null && !gameOver()) FThreads.invokeInEdtLater(() -> {
+            var game = stopped.getGame();
+            if (game == null || game.isGameOver()) return;
+            for (var player : game.getRegisteredPlayers()) player.concede();
+            game.getAction().checkGameOverCondition();
+            for (var player : game.getRegisteredPlayers())
+                if (player.getController() instanceof PlayerControllerHuman human) human.getInputQueue().onGameOver(true);
+        });
         match = null;
         for (Seat seat : seats) { seat.gui = null; seat.me = null; }
     }
 
     /** Explicit departure ends an unfinished series; a completed result remains intact. */
     synchronized void abandon(Seat seat) {
-        if (!matchOver()) {
+        if (!config.commander() && !matchOver()) {
             abandoned = true;
             matchPhase = "complete";
             markDirty();
@@ -255,22 +268,35 @@ final class Session {
     synchronized void concede(Seat seat) {
         if ("sideboarding".equals(matchPhase)) { abandoned = true; matchPhase = "complete"; markDirty(); }
         IGameController c = seat.controller();
-        // A concession ends this game even when the other player owns the blocking decision.
+        // A Commander concession removes one seat, preserving every other player's decision.
         for (Seat each : seats) {
+            if (config.commander() && each != seat) continue;
             Question q = each.question;
             each.question = null;
             each.inputGen.incrementAndGet(); each.clearInput();
             if (q != null) q.answer().complete(defaultAnswer(q));
         }
         markDirty();
-        if (c != null && match != null && !gameOver()) FThreads.invokeInEdtLater(c::concede);
+        HostedMatch current = match;
+        if (c != null && current != null && !gameOver()) FThreads.invokeInEdtLater(() -> {
+            if (current != match) return;
+            c.concede();
+            if (current.getGameView().isGameOver()) for (Seat each : seats) {
+                Question pending = each.question; each.question = null;
+                each.inputGen.incrementAndGet(); each.clearInput();
+                if (pending != null) pending.answer().complete(defaultAnswer(pending));
+            }
+            if (c instanceof PlayerControllerHuman human) human.getInputQueue().onGameOver(true);
+            markDirty();
+        });
     }
 
     // ---------- Mensagens do navegador ----------
 
     void onClientMessage(Seat seat, Channel source, String type, JsonObject msg) {
+        if (seat.eliminated() && !Set.of("preferences", "hello").contains(type)) { markDirty(); return; }
         int actionGen = -1;
-        if (Set.of("card", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
+        if (Set.of("card", "attack", "block", "player", "stack", "mana", "ok", "cancel", "pass-turn").contains(type)) {
             if (!msg.has("gen") || !msg.get("gen").isJsonPrimitive() || !msg.get("gen").getAsJsonPrimitive().isNumber()) { markDirty(); return; }
             actionGen = exactInt(msg.get("gen"));
             if (actionGen != seat.inputGen.get() || seat.question != null || !"playing".equals(matchPhase)) { markDirty(); return; }
@@ -302,6 +328,16 @@ final class Session {
                 markDirty();
             }
             case "concede" -> concede(seat);
+            case "attack" -> {
+                int attacker = exactInt(msg.get("attacker")), defender = exactInt(msg.get("defender"));
+                String kind = MatchConfig.string(msg, "defenderKind");
+                seat.onEdt(genAtClick, c -> {
+                    if (!(c instanceof PlayerControllerHuman human)
+                        || !InputContext.assignAttack(human.getInputQueue().getInput(), attacker, defender, kind))
+                        seat.send(toast("error", "Esse ataque não é válido. Escolha um defensor permitido."));
+                    markDirty();
+                });
+            }
             case "block" -> {
                 int attacker = exactInt(msg.get("attacker")), blocker = exactInt(msg.get("blocker"));
                 seat.onEdt(genAtClick, c -> {
@@ -356,7 +392,7 @@ final class Session {
         GameView gv = match == null ? null : match.getGameView();
         if (gv == null) return null;
         for (PlayerView p : gv.getPlayers()) {
-            List<Iterable<CardView>> zones = new ArrayList<>(List.of(nz(p.getBattlefield()), nz(p.getGraveyard()), nz(p.getExile())));
+            List<Iterable<CardView>> zones = new ArrayList<>(List.of(nz(p.getBattlefield()), nz(p.getGraveyard()), nz(p.getExile()), nz(p.getCommand())));
             if (p.equals(seat.me)) zones.add(nz(p.getHand()));
             for (Iterable<CardView> zone : zones) {
                 for (CardView c : zone) if (c.getId() == id) return c;
@@ -511,6 +547,7 @@ final class Session {
         }
 
         Question question = new Question(id, ev.getMethod(), a, options, new CompletableFuture<>(), q);
+        if (seat.eliminated()) return defaultAnswer(question);
         seat.question = question;
         markDirty();
         try {
@@ -736,21 +773,28 @@ final class Session {
                 PlayerView p = seat.me;
                 state = StateJson.game(gv, p == null ? -2 : p.getId(), m.getGame());
                 state.addProperty("you", p == null ? -1 : p.getId());
+                boolean spectating = seat.eliminated();
+                state.addProperty("spectating", spectating);
                 JsonObject input = new JsonObject();
                 int generation = seat.inputGen.get();
-                Object currentInput = seat.controller() instanceof PlayerControllerHuman human ? human.getInputQueue().getInput() : null;
+                Object currentInput = !spectating && seat.controller() instanceof PlayerControllerHuman human ? human.getInputQueue().getInput() : null;
                 boolean priority = currentInput instanceof InputPassPriority;
                 input.addProperty("priority", priority);
+                JsonObject attacking = InputContext.attacking(currentInput);
+                if (attacking != null) input.add("attacking", attacking);
                 JsonObject blocking = InputContext.blocking(currentInput);
                 if (blocking != null) input.add("blocking", blocking);
                 JsonObject suspendCast = InputContext.suspendCast(currentInput);
                 if (suspendCast != null) input.add("suspendCast", suspendCast);
                 JsonObject selection = InputContext.selection(currentInput);
                 if (selection != null) input.add("selection", selection);
+                Set<Integer> playerChoices = InputContext.playerChoices(currentInput);
                 if (currentInput instanceof InputLondonMulligan) input.addProperty("opening", "mulligan-bottom");
                 else if (currentInput instanceof InputConfirmMulligan) input.addProperty("opening", "mulligan");
                 else if (currentInput instanceof InputConfirm && m.getGame().getAge() == GameStage.BeforeMulligan && !events.gameStarted())
                     input.addProperty("opening", "play-draw");
+                else if (!playerChoices.isEmpty() && m.getGame().getAge() == GameStage.BeforeMulligan && !events.gameStarted())
+                    input.addProperty("opening", "starting-player");
                 if (input.has("opening")) {
                     try {
                         if (currentInput instanceof InputConfirmMulligan) {
@@ -773,14 +817,15 @@ final class Session {
                 seat.lockedAtLastFlush = locked;
                 input.addProperty("gen", generation);
                 input.addProperty("message", seat.message);
-                input.add("ok", button(priority && "OK".equalsIgnoreCase(seat.okLabel) ? "Passar prioridade" : seat.okLabel, seat.okEnabled && !locked));
-                input.add("cancel", button(seat.cancelLabel, seat.cancelEnabled && !locked));
+                input.add("ok", button(priority && "OK".equalsIgnoreCase(seat.okLabel) ? "Passar prioridade" : seat.okLabel, seat.okEnabled && !locked && !spectating));
+                input.add("cancel", button(seat.cancelLabel, seat.cancelEnabled && !locked && !spectating));
                 JsonArray sel = new JsonArray();
                 seat.selectable.forEach(sel::add);
                 input.add("selectable", sel);
                 JsonArray stackTargets = new JsonArray(); seat.selectableStacks.forEach(stackTargets::add);
                 input.add("selectableStacks", stackTargets);
-                JsonArray playerTargets = new JsonArray(); seat.selectablePlayers.forEach(playerTargets::add);
+                Set<Integer> playerIds = new LinkedHashSet<>(seat.selectablePlayers); playerIds.addAll(playerChoices);
+                JsonArray playerTargets = new JsonArray(); playerIds.forEach(playerTargets::add);
                 input.add("selectablePlayers", playerTargets);
                 JsonArray act = new JsonArray();
                 seat.actionable.forEach(act::add);
@@ -795,7 +840,7 @@ final class Session {
                 if (promptCard != null) input.add("card", StateJson.card(promptCard));
                 state.add("input", input);
                 Question q = seat.question;
-                if (q != null) state.add("question", q.json());
+                if (q != null && !spectating) state.add("question", q.json());
                 // Phase/zone events can precede the actionable input. Never advertise an early cast.
                 if (!priority || !seat.okEnabled || locked || q != null) state.add("castable", new JsonArray());
                 if (generation != seat.inputGen.get()) return null;
@@ -840,12 +885,16 @@ final class Session {
         r.addProperty("seat", seat.index);
         r.addProperty("token", seat.token);
         r.addProperty("started", started());
+        r.addProperty("capacity", config.playerCount());
         r.add("config", config.json());
         MatchConfig.versions(r);
         JsonArray ps = new JsonArray();
         for (Seat s : seats) {
             if (s.deck == null) continue;
             JsonObject p = new JsonObject();
+            p.addProperty("seat", s.index);
+            p.addProperty("playerId", s.me == null ? null : s.me.getId());
+            p.addProperty("eliminated", s.eliminated());
             p.addProperty("name", s.name);
             p.addProperty("connected", s.channel != null);
             p.addProperty("rematch", s.rematch);
@@ -858,10 +907,11 @@ final class Session {
     JsonObject publicRoomJson() {
         JsonObject r = new JsonObject();
         r.addProperty("code", code); r.addProperty("available", !full() && !started());
+        r.addProperty("capacity", config.playerCount());
         r.add("config", config.json()); MatchConfig.versions(r);
         JsonArray players = new JsonArray();
         for (Seat seat : seats) if (seat.deck != null) {
-            JsonObject p = new JsonObject(); p.addProperty("name", seat.name); p.addProperty("connected", seat.channel != null); players.add(p);
+            JsonObject p = new JsonObject(); p.addProperty("seat", seat.index); p.addProperty("name", seat.name); p.addProperty("connected", seat.channel != null); players.add(p);
         }
         r.add("players", players); return r;
     }
@@ -892,11 +942,12 @@ final class Session {
     final class Seat {
         final int index;
         /** Segredo para voltar ao assento depois de cair a conexão ({type:"rejoin", code, token}). */
-        final String token = UUID.randomUUID().toString();
+        volatile String token = UUID.randomUUID().toString();
         volatile Channel channel;
         volatile String name;
         volatile Deck deck;
         volatile boolean rematch;
+        volatile boolean departed;
         private volatile RegisteredPlayer registered;
         private volatile Deck approvedDeck;
         private volatile boolean sideboardReady;
@@ -935,6 +986,8 @@ final class Session {
         Session session() { return Session.this; }
 
         void bind(Channel ch, String name, Deck deck) {
+            this.token = UUID.randomUUID().toString();
+            this.departed = false;
             this.channel = ch;
             this.name = name;
             this.deck = deck;
@@ -961,6 +1014,8 @@ final class Session {
             PlayerView p = me;
             return g == null || p == null ? null : g.getGameController(p);
         }
+
+        boolean eliminated() { return config.commander() && me != null && me.getHasLost(); }
 
         private boolean livePriority() {
             return controller() instanceof PlayerControllerHuman human && human.getInputQueue().getInput() instanceof InputPassPriority;

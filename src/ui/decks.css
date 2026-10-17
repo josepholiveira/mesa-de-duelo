@@ -229,3 +229,20 @@
   .dw-button:active:not(:disabled):not(:focus-visible) { transform: none; }
   .dw-preview[open] { animation: none; }
 }
+
+.dw-commander-zone { display: flex; align-items: center; justify-content: space-between; gap: 32px; margin-bottom: 28px; padding: 26px; border: 1px solid #b9904c66; border-radius: 14px; background: linear-gradient(115deg, #172840, #101a2e); }
+.dw-commander-cards { display: flex; align-items: stretch; gap: 24px; flex-wrap: wrap; }
+.dw-commander { display: flex; align-items: center; gap: 20px; max-width: 430px; }
+.dw-commander h2 { margin: 8px 0 20px; font: 600 24px/1.2 var(--display, sans-serif); }
+.dw-commander-portrait { width: 145px; aspect-ratio: 488/680; flex-shrink: 0; border: 1px solid #b9904c99; border-radius: 9px; background: var(--dw-bg); color: var(--dw-ink); padding: 0; cursor: zoom-in; box-shadow: 0 8px 18px #0007, 3px 3px #18283d; overflow: hidden; }
+.dw-commander-portrait img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.dw-commander-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; min-width: 170px; min-height: 160px; padding: 20px; border: 1px dashed #b9904c99; border-radius: 10px; background: #080d1a55; color: var(--dw-ink); cursor: pointer; font: inherit; }
+.dw-commander-add { align-self: center; color: var(--dw-muted); white-space: nowrap; }
+.dw-commander-empty > span { font-size: 28px; color: var(--dw-accent); }
+.dw-commander-empty small { color: var(--dw-muted); }
+.dw-commander-summary { max-width: 250px; flex-shrink: 0; }
+.dw-commander-summary > strong { font-size: 32px; font-weight: 500; }
+.dw-commander-summary > strong small { font-size: 16px; color: var(--dw-muted); }
+.dw-commander-summary p { margin: 6px 0; }
+@media (max-width: 1000px) { .dw-commander-zone { flex-wrap: wrap; } .dw-commander-summary { max-width: none; } }
+@media (max-width: 520px) { .dw-commander-zone { padding: 16px; gap: 20px; } .dw-commander-portrait { width: 98px; } .dw-commander h2 { font-size: 19px; } .dw-commander-empty { min-height: 100px; width: 100%; } }

@@ -56,7 +56,7 @@ final class Rooms implements BridgeServer.Listener {
     @Override public void onConnect(Channel ch) {
         JsonObject hello = new JsonObject();
         hello.addProperty("type", "hello");
-        JsonArray formats = new JsonArray(); formats.add("free"); formats.add("pauper");
+        JsonArray formats = new JsonArray(); formats.add("free"); formats.add("pauper"); formats.add("commander");
         hello.add("supportedFormats", formats);
         MatchConfig.versions(hello);
         BridgeServer.send(ch, hello.toString());
@@ -71,8 +71,9 @@ final class Rooms implements BridgeServer.Listener {
         seat.channel = null;
         System.out.printf("%s: %s desconectou%n", label(s), seat.name);
         if (!s.isRoom() || !s.started()) {
-            // Uma sala ainda sem oponente não tem o que guardar.
-            if (s.isRoom()) close(s); else expireIfAbandoned(s);
+            if (s.isRoom()) broadcastRoom(s);
+            expireIfAbandoned(s);
+            s.markDirty();
             return;
         }
         notifyOthers(s, seat, seat.name + " desconectou. Aguardando a reconexão…");
@@ -113,11 +114,15 @@ final class Rooms implements BridgeServer.Listener {
                 case "start" -> {
                     MatchConfig config = MatchConfig.parse(msg.get("config"));
                     Deck you = validated(msg.get("you"), config.format(), "you");
-                    JsonElement opponent = msg.get("opponent");
-                    Deck ai = opponent == null || opponent.isJsonNull()
-                        || (opponent.isJsonPrimitive() && "random".equals(opponent.getAsString()))
-                        ? Decks.random(config.format()) : validated(opponent, config.format(), "opponent");
-                    solo(ch, you, ai, config);
+                    java.util.List<Deck> opponents = new java.util.ArrayList<>();
+                    if (msg.has("opponents")) {
+                        if (!msg.get("opponents").isJsonArray() || msg.getAsJsonArray("opponents").size() != config.playerCount() - 1)
+                            throw new IllegalArgumentException("Escolha um deck para cada oponente.");
+                        for (JsonElement opponent : msg.getAsJsonArray("opponents")) opponents.add(aiDeck(opponent, config));
+                    } else {
+                        for (int i = 1; i < config.playerCount(); i++) opponents.add(aiDeck(msg.get("opponent"), config));
+                    }
+                    solo(ch, you, opponents, config);
                 }
                 case "host" -> {
                     MatchConfig config = MatchConfig.parse(msg.get("config"));
@@ -159,6 +164,12 @@ final class Rooms implements BridgeServer.Listener {
         return result.deck();
     }
 
+    private static Deck aiDeck(JsonElement opponent, MatchConfig config) {
+        return opponent == null || opponent.isJsonNull()
+            || (opponent.isJsonPrimitive() && "random".equals(opponent.getAsString()))
+            ? Decks.random(config.format()) : validated(opponent, config.format(), "opponent");
+    }
+
     private synchronized void lookup(Channel ch, String code, String requestId) {
         Session s = byCode.get(code);
         if (s == null || !s.isRoom()) throw new IllegalArgumentException("Não existe sala com o código " + code + ".");
@@ -196,9 +207,9 @@ final class Rooms implements BridgeServer.Listener {
 
     // ---------- Partidas ----------
 
-    private synchronized void solo(Channel ch, Deck you, Deck opponent, MatchConfig config) {
+    private synchronized void solo(Channel ch, Deck you, java.util.List<Deck> opponents, MatchConfig config) {
         leave(ch);
-        Session s = Session.solo(newCode(8), ch, you, opponent, config);
+        Session s = Session.solo(newCode(8), ch, you, opponents, config);
         byCode.put(s.code, s);
         byChannel.put(ch, s);
         s.start();
@@ -217,26 +228,30 @@ final class Rooms implements BridgeServer.Listener {
         Session s = byCode.get(code);
         if (s == null || !s.isRoom()) throw new IllegalArgumentException("Não existe sala com o código " + code + ".");
         if (s.seatOf(ch) != null) return;
-        if (s.full()) throw new IllegalArgumentException("A sala " + code + " já está cheia.");
+        if (s.full() || s.started()) throw new IllegalArgumentException("A sala " + code + " já está cheia.");
         Deck deck = validated(payload, s.config.format(), "deck");
         leave(ch);
-        Session.Seat seat = s.seats[1];
+        Session.Seat seat = java.util.Arrays.stream(s.seats).filter(each -> each.deck == null).findFirst().orElseThrow();
         seat.bind(ch, name, deck);
         byChannel.put(ch, s);
         System.out.printf("Sala %s: %s entrou (%s)%n", code, name, deck.getName());
         for (Session.Seat each : s.seats) s.sendRoom(each);
-        s.start();
+        if (s.full()) s.start();
+        else s.markDirty();
     }
 
     private synchronized void rejoin(Channel ch, String code, String token) {
         Session s = byCode.get(code);
         Session.Seat seat = null;
-        if (s != null) for (Session.Seat each : s.seats) if (each.token.equals(token)) seat = each;
+        if (s != null) for (Session.Seat each : s.seats) if (!each.departed && each.deck != null && each.token.equals(token)) seat = each;
         if (seat == null) {
             // Resposta própria para o navegador esquecer a partida guardada em vez de tentar de novo.
             BridgeServer.send(ch, Session.toast("gone", "A partida " + code + " não existe mais."));
             return;
         }
+        Session.Seat currentSeat = s.seatOf(ch);
+        if (currentSeat != null && currentSeat != seat)
+            throw new IllegalArgumentException("Saia do seu assento antes de voltar a outro assento nesta sala.");
         if (seat.channel != null && seat.channel != ch) {
             // A conexão antiga pode ter caído sem a ponte perceber (Wi-Fi que some, notebook que dorme).
             // Ou a partida foi aberta em outra aba: a antiga é avisada para não tentar voltar sozinha.
@@ -250,7 +265,8 @@ final class Rooms implements BridgeServer.Listener {
         byChannel.put(ch, s);
         System.out.printf("%s: %s voltou%n", label(s), seat.name);
         if (s.isRoom()) {
-            s.sendRoom(seat);
+            if (s.started()) s.sendRoom(seat);
+            else broadcastRoom(s);
             notifyOthers(s, seat, seat.name + " voltou.");
         }
         s.markDirty();
@@ -280,6 +296,11 @@ final class Rooms implements BridgeServer.Listener {
         if (s == null) return;
         Session.Seat seat = s.seatOf(ch);
         if (!s.isRoom()) { close(s); return; }
+        if (seat != null && !s.started() && seat.index != 0) {
+            seat.channel = null; seat.deck = null; seat.departed = true;
+            for (Session.Seat each : s.seats) if (each.deck != null) s.sendRoom(each);
+            s.markDirty(); expireIfAbandoned(s); return;
+        }
         if (seat != null) {
             s.abandon(seat);
             seat.channel = null;
@@ -301,6 +322,10 @@ final class Rooms implements BridgeServer.Listener {
             }
         }
         if (s.isRoom()) System.out.printf("Sala %s fechada%n", s.code);
+    }
+
+    private static void broadcastRoom(Session s) {
+        for (Session.Seat each : s.seats) if (each.deck != null && each.channel != null) s.sendRoom(each);
     }
 
     private static void notifyOthers(Session s, Session.Seat from, String text) {

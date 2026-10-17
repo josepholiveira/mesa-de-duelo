@@ -34,6 +34,7 @@ final class DeckValidation {
             o.addProperty("valid", valid());
             o.add("issues", issues.deepCopy());
             o.addProperty("mainCount", deck.getMain().countAll());
+            o.addProperty("commanderCount", deck.getOrCreate(DeckSection.Commander).countAll());
             o.addProperty("sideboardCount", deck.getOrCreate(DeckSection.Sideboard).countAll());
             MatchConfig.versions(o);
             if (valid()) o.add("deck", deckJson(deck));
@@ -42,7 +43,7 @@ final class DeckValidation {
     }
 
     static Result validate(JsonElement payload, String format) {
-        if (!Set.of("free", "pauper").contains(format)) throw new IllegalArgumentException("Formato não suportado.");
+        if (!Set.of("free", "pauper", "commander").contains(format)) throw new IllegalArgumentException("Formato não suportado.");
         JsonArray issues = new JsonArray();
         Deck deck = new Deck("Deck");
         if (payload != null && payload.isJsonPrimitive() && payload.getAsJsonPrimitive().isString()) {
@@ -57,6 +58,7 @@ final class DeckValidation {
             deck = new Deck(o.get("name").getAsString().strip().substring(0, Math.min(100, o.get("name").getAsString().strip().length())));
         readSection(o.get("cards"), deck.getMain(), "main", issues, true);
         readSection(o.get("sideboard"), deck.getOrCreate(DeckSection.Sideboard), "sideboard", issues, false);
+        readSection(o.get("commanders"), deck.getOrCreate(DeckSection.Commander), "commander", issues, false);
         checkRules(deck, format, issues);
         return new Result(deck, issues);
     }
@@ -94,7 +96,7 @@ final class DeckValidation {
             PaperCard card = resolve(name);
             if (card == null) { issue(issues, "unknown-card", "Carta não encontrada no motor de regras.", name, section); continue; }
             if (row.has("oracleId") && (!row.get("oracleId").isJsonPrimitive() || !row.get("oracleId").getAsJsonPrimitive().isString()
-                || (PauperLegality.oracleId(card.getName()) != null && !PauperLegality.oracleId(card.getName()).equals(row.get("oracleId").getAsString())))) {
+                || (oracleId(card.getName()) != null && !oracleId(card.getName()).equals(row.get("oracleId").getAsString())))) {
                 issue(issues, "identity-mismatch", "O identificador da carta não corresponde ao nome informado.", name, section); continue;
             }
             if (card.getRules().isUnsupported()) { issue(issues, "unsupported-card", "Esta carta ainda não é suportada pelo motor de regras.", name, section); continue; }
@@ -115,6 +117,9 @@ final class DeckValidation {
         int main = deck.getMain().countAll(), side = deck.getOrCreate(DeckSection.Sideboard).countAll();
         if (main < ("pauper".equals(format) ? 60 : 1))
             issue(issues, "main-too-small", "pauper".equals(format) ? "Pauper exige pelo menos 60 cartas no deck principal." : "Adicione pelo menos uma carta ao deck.", null, "main");
+        if ("commander".equals(format)) { checkCommander(deck, issues); return; }
+        if (deck.getOrCreate(DeckSection.Commander).countAll() > 0)
+            issue(issues, "wrong-section", "A zona de comando exige o formato Commander.", null, "commander");
         if (!"pauper".equals(format)) return;
         if (side > 15) issue(issues, "sideboard-too-large", "O sideboard pode ter até 15 cartas.", null, "sideboard");
         GameFormat pauper = FModel.getFormats().getPauper();
@@ -144,6 +149,47 @@ final class DeckValidation {
         if (issues.isEmpty() && legality != null) issue(issues, "wrong-format", "O deck contém cartas não permitidas no Pauper: " + legality, null, null);
     }
 
+    private static void checkCommander(Deck deck, JsonArray issues) {
+        CardPool commanders = deck.getOrCreate(DeckSection.Commander);
+        int commanderCount = commanders.countAll();
+        if (commanderCount < 1 || commanderCount > 2)
+            issue(issues, "commander-count", "Escolha um comandante ou dois com uma parceria válida.", null, "commander");
+        if (deck.getMain().countAll() + commanderCount != 100)
+            issue(issues, "total-count", "Commander exige exatamente 100 cartas, incluindo os comandantes.", null, "main");
+        if (deck.getOrCreate(DeckSection.Sideboard).countAll() != 0)
+            issue(issues, "sideboard-not-supported", "Commander não usa sideboard nesta mesa. Companheiros ainda não são suportados.", null, "sideboard");
+        byte identity = 0;
+        for (var e : commanders) {
+            var rules = e.getKey().getRules();
+            identity |= rules.getColorIdentity().getColor();
+            if (e.getValue() != 1 || !DeckFormat.Commander.isLegalCommander(rules) || (commanderCount == 1 && rules.canBeBackground()))
+                issue(issues, "invalid-commander", "Esta carta não pode ocupar esta posição de comandante.", e.getKey().getName(), "commander");
+            if (rules.getAddsWildCardColor() || rules.getDeckRules().iterator().hasNext())
+                issue(issues, "unsupported-commander-choice", "Comandantes com escolhas extras de cor ou regras especiais de construção ainda não são suportados nesta mesa.", e.getKey().getName(), "commander");
+        }
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (var section : new DeckSection[]{DeckSection.Main, DeckSection.Commander, DeckSection.Sideboard}) {
+            String where = section == DeckSection.Main ? "main" : section == DeckSection.Commander ? "commander" : "sideboard";
+            for (var e : deck.getOrCreate(section)) {
+                PaperCard card = e.getKey();
+                counts.merge(StaticData.instance().getCommonCards().getNormalizedName(card.getName()), e.getValue(), Integer::sum);
+                if (UNIVERSAL_BANS.contains(card.getName()) || FModel.getFormats().get("Commander").getBannedCardNames().contains(card.getName()))
+                    issue(issues, "banned-card", "Esta carta está banida em Commander.", card.getName(), where);
+                else if (card.getRules().isCustom() || !CommanderLegality.permits(card.getName()) || !DeckFormat.Commander.isLegalCard(card))
+                    issue(issues, "wrong-format", "Esta carta não é permitida em Commander.", card.getName(), where);
+                if (!card.getRules().getColorIdentity().hasNoColorsExcept(identity))
+                    issue(issues, "color-identity", "A identidade de cor desta carta está fora da identidade dos comandantes.", card.getName(), where);
+            }
+        }
+        for (var e : counts.entrySet()) {
+            PaperCard card = resolve(e.getKey());
+            if (card != null && e.getValue() > DeckFormat.Commander.getMaxCardCopies(card))
+                issue(issues, "too-many-copies", "Commander permite uma cópia de cada carta, salvo terrenos básicos e exceções do texto Oracle.", card.getName(), null);
+        }
+        String problem = DeckFormat.Commander.getDeckConformanceProblem(deck);
+        if (problem != null) issue(issues, "commander-construction", "Confira os comandantes, a parceria e a construção do deck: " + problem, null, null);
+    }
+
     static Map<String, Integer> poolCounts(Deck deck) {
         Map<String, Integer> out = new LinkedHashMap<>();
         for (var section : new DeckSection[]{DeckSection.Main, DeckSection.Sideboard})
@@ -152,11 +198,16 @@ final class DeckValidation {
         return out;
     }
 
+    private static String oracleId(String name) {
+        String id = PauperLegality.oracleId(name);
+        return id != null ? id : CommanderLegality.oracleId(name);
+    }
+
     static JsonArray entries(CardPool pool) {
         JsonArray a = new JsonArray();
         for (var e : pool) {
             JsonObject o = new JsonObject(); o.addProperty("name", e.getKey().getName()); o.addProperty("count", e.getValue());
-            String oracleId = PauperLegality.oracleId(e.getKey().getName());
+            String oracleId = oracleId(e.getKey().getName());
             if (oracleId != null) o.addProperty("oracleId", oracleId);
             a.add(o);
         }
@@ -166,6 +217,7 @@ final class DeckValidation {
     static JsonObject deckJson(Deck deck) {
         JsonObject o = new JsonObject(); o.addProperty("name", deck.getName());
         o.add("cards", entries(deck.getMain())); o.add("sideboard", entries(deck.getOrCreate(DeckSection.Sideboard)));
+        o.add("commanders", entries(deck.getOrCreate(DeckSection.Commander)));
         return o;
     }
 
